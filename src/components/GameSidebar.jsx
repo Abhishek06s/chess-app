@@ -1,12 +1,8 @@
 import { Chess } from "chess.js";
 import { useEffect, useRef, useState } from "react";
-import {
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-} from "react-feather";
+import { ZoomIn } from "react-feather";
 import { toast } from "react-hot-toast";
+import { useNavigate } from "react-router-dom";
 
 const GameSidebar = ({
   moves,
@@ -19,12 +15,25 @@ const GameSidebar = ({
   whiteFlagged,
   blackFlagged,
   resetCapturedPieces,
-  moveIndex,
-  goToFirst,
-  goToPrevious,
-  goToNext,
-  goToLast,
 }) => {
+  const navigate = useNavigate();
+
+  const openAnalysis = () => {
+    const tempGame = new Chess();
+
+    moves.forEach((move) => {
+      tempGame.move(move);
+    });
+
+    navigate("/analysis", {
+      state: {
+        moves,
+        pgn: tempGame.pgn(),
+        fen: tempGame.fen(),
+      },
+    });
+  };
+
   const [showShareMenu, setShowShareMenu] = useState(false);
   const copyPGN = async () => {
     const tempGame = new Chess();
@@ -109,31 +118,39 @@ const GameSidebar = ({
     <div className="bg-zinc-900 rounded-2xl p-6 h-fit">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold mb-4">Game Information</h2>
-        <div className="relative mb-4">
+        <div className="flex items-center gap-3">
           <button
-            onClick={() => setShowShareMenu(!showShareMenu)}
-            className="w-full py-3 px-4 rounded-xl cursor-pointer bg-purple-600 hover:bg-purple-500 transition"
+            onClick={openAnalysis}
+            className="bg-zinc-700 hover:bg-zinc-600 p-3 rounded-lg transition"
           >
-            📤 Share Game
+            <ZoomIn size={24} className="cursor-pointer" />
           </button>
+          <div className="relative">
+            <button
+              onClick={() => setShowShareMenu(!showShareMenu)}
+              className="w-full py-3 px-4 rounded-xl cursor-pointer bg-purple-600 hover:bg-purple-500 transition"
+            >
+              📤 Share Game
+            </button>
 
-          {showShareMenu && (
-            <div className="absolute mt-2 w-full bg-zinc-800 rounded-xl shadow-lg overflow-hidden z-10">
-              <button
-                onClick={copyPGN}
-                className="w-full text-left px-4 py-3 hover:bg-zinc-700 cursor-pointer"
-              >
-                📋 Copy PGN
-              </button>
+            {showShareMenu && (
+              <div className="absolute mt-2 w-full bg-zinc-800 rounded-xl shadow-lg overflow-hidden z-10">
+                <button
+                  onClick={copyPGN}
+                  className="w-full text-left px-4 py-3 hover:bg-zinc-700 cursor-pointer"
+                >
+                  📋 Copy PGN
+                </button>
 
-              <button
-                onClick={copyFEN}
-                className="w-full text-left px-4 py-3 hover:bg-zinc-700 cursor-pointer"
-              >
-                📋 Copy FEN
-              </button>
-            </div>
-          )}
+                <button
+                  onClick={copyFEN}
+                  className="w-full text-left px-4 py-3 hover:bg-zinc-700 cursor-pointer"
+                >
+                  📋 Copy FEN
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -176,39 +193,6 @@ const GameSidebar = ({
           <div className={`${statusClass}`}>{statusText}</div>
         </div>
       </div>
-      <div className="grid grid-cols-4 gap-2 mb-4">
-        <button
-          onClick={goToFirst}
-          className="flex justify-center bg-zinc-700 py-2 rounded-lg"
-        >
-          <ChevronsLeft size={34} className="cursor-pointer" />
-        </button>
-
-        <button
-          onClick={goToPrevious}
-          className="flex justify-center bg-zinc-700 py-2 rounded-lg"
-        >
-          <ChevronLeft size={34} className="cursor-pointer" />
-        </button>
-
-        <button
-          onClick={goToNext}
-          className="flex justify-center bg-zinc-700 py-2 rounded-lg"
-        >
-          <ChevronRight size={34} className="cursor-pointer" />
-        </button>
-
-        <button
-          onClick={goToLast}
-          className="flex justify-center bg-zinc-700 py-2 rounded-lg"
-        >
-          <ChevronsRight size={34} className="cursor-pointer" />
-        </button>
-      </div>
-
-      <p className="text-zinc-400 text-sm mb-4">
-        Move {Math.max(moveIndex + 1, 0)} / {moves.length}
-      </p>
 
       <h3 className="font-semibold mb-4">Move History</h3>
 

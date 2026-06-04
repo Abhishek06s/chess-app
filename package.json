@@ -20,6 +20,7 @@
     "react-feather": "^2.0.10",
     "react-hot-toast": "^2.6.0",
     "react-router-dom": "^6.22.0",
+    "stockfish": "^18.0.7",
     "tailwindcss": "^4.0.0"
   },
   "devDependencies": {

@@ -7,7 +7,6 @@ import PlayerCard from "../components/PlayerCard";
 
 import useChessClock from "../hooks/useChessClock";
 import useCapturedPieces from "../hooks/useCapturedPieces";
-import useMoveNavigation from "../hooks/useMoveNavigation";
 
 const Play = () => {
   const [game, setGame] = useState(new Chess());
@@ -34,16 +33,6 @@ const Play = () => {
     groupedWhitePieces,
     groupedBlackPieces,
   } = useCapturedPieces();
-
-  const {
-    moveIndex,
-    setMoveIndex,
-    getPositionAtMove,
-    goToFirst,
-    goToPrevious,
-    goToNext,
-    goToLast,
-  } = useMoveNavigation(moves);
 
   const flipBoard = () => {
     setBoardOrientation((prev) => (prev === "white" ? "black" : "white"));
@@ -153,11 +142,6 @@ const Play = () => {
             whiteFlagged={whiteFlagged}
             blackFlagged={blackFlagged}
             resetCapturedPieces={resetCapturedPieces}
-            moveIndex={moveIndex}
-            goToFirst={goToFirst}
-            goToPrevious={goToPrevious}
-            goToNext={goToNext}
-            goToLast={goToLast}
           />
         </div>
       </div>
