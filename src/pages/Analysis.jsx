@@ -63,18 +63,14 @@ const Analysis = () => {
     }
   }, [moveIndex, positions]);
 
-  // Initialize your custom chess sounds hook
   const { playMoveSound, playCaptureSound, playCheckSound, playGameEndSound } =
     useChessSounds();
 
-  // 1. DYNAMIC SOUND TRIGGERING LOGIC
-  // This plays the exact correct sound whenever you change moves!
   const triggerMoveSound = (targetIndex) => {
     if (targetIndex === 0 || !positions.length) return;
 
     try {
       const prevGame = new Chess(positions[targetIndex - 1]);
-      // Replay the move to inspect its properties (check, capture, etc.)
       const moveResult = prevGame.move(moveHistory[targetIndex - 1]);
 
       if (moveResult) {
@@ -151,9 +147,10 @@ const Analysis = () => {
     });
   }
 
-  const currentFen = positions && positions.length > 0 
-  ? positions[moveIndex] 
-  : "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+  const currentFen =
+    positions && positions.length > 0
+      ? positions[moveIndex]
+      : "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
   const { evaluation, bestMove, depth, topLines } = useStockfish(currentFen);
 
