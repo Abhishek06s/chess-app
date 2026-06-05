@@ -49,7 +49,7 @@ const Analysis = () => {
     setPositions(positions);
     setMoveHistory(history);
 
-    setMoveIndex(positions.length - 1);
+    setMoveIndex(0);
   }, [state]);
 
   useEffect(() => {
@@ -151,9 +151,11 @@ const Analysis = () => {
     });
   }
 
-  const currentFen = positions.length > 0 ? positions[moveIndex] : null;
+  const currentFen = positions && positions.length > 0 
+  ? positions[moveIndex] 
+  : "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 
-  const { evaluation, bestMove, depth } = useStockfish(currentFen);
+  const { evaluation, bestMove, depth, topLines } = useStockfish(currentFen);
 
   const isMate =
     typeof evaluation === "string" &&
@@ -203,12 +205,11 @@ const Analysis = () => {
           <div className="flex flex-col items-center">
             <div className="w-full max-w-175 rounded-xs">
               <Chessboard
-                position={
-                  positions.length > 0 ? positions[moveIndex] : undefined
-                }
+                position={currentFen}
                 arePiecesDraggable={false}
                 animationDuration={250}
                 boardWidth={700}
+                customSquareStyles={getCustomSquareStyles()}
               />
             </div>
 
@@ -261,6 +262,51 @@ const Analysis = () => {
               <p className="text-zinc-400">ECO: {openingInfo.eco}</p>
             </div>
           )}
+
+          <div className="mt-4 bg-zinc-900 border border-zinc-800 rounded-xl p-4 shadow-lg">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-zinc-400 text-sm font-bold tracking-wider uppercase">
+                Top Engine Variations
+              </h3>
+              <span className="text-xs bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md font-mono">
+                Multi-PV
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-2.5">
+              {topLines.length === 0 ? (
+                <p className="text-sm text-zinc-500 italic animate-pulse">
+                  Calculating candidate lines...
+                </p>
+              ) : (
+                topLines.map((line, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center gap-3 bg-zinc-950/50 p-2.5 rounded-lg border border-zinc-800/40 hover:border-zinc-700/60 transition-colors"
+                  >
+                    <span className="text-xs font-black text-zinc-600 w-4">
+                      #{index + 1}
+                    </span>
+
+                    <span
+                      className={`text-xs font-mono font-extrabold px-2 py-1 rounded min-w-13.5 text-center ${
+                        line.eval.includes("-")
+                          ? "bg-red-950/40 text-red-400 border border-red-900/30"
+                          : "bg-emerald-950/40 text-emerald-400 border border-emerald-900/30"
+                      }`}
+                    >
+                      {line.eval}
+                    </span>
+
+                    <p className="text-sm font-medium text-zinc-300 font-mono tracking-wide truncate flex-1">
+                      {line.continuation || "Calculating moves..."}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
           <div className="bg-zinc-800 flex gap-20 items-center rounded-xl p-4 mb-8">
             <div>
               <h3 className="text-zinc-400 text-sm">Engine Evaluation</h3>
