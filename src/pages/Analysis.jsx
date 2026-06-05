@@ -11,7 +11,9 @@ import {
 } from "react-feather";
 
 import openings from "../data/openings";
+import useChessSounds from "../hooks/useChessSounds";
 import useStockfish from "../hooks/useStockfish";
+import { delay } from "framer-motion";
 
 const Analysis = () => {
   const { state } = useLocation();
@@ -61,20 +63,81 @@ const Analysis = () => {
     }
   }, [moveIndex, positions]);
 
+  // Initialize your custom chess sounds hook
+  const { playMoveSound, playCaptureSound, playCheckSound, playGameEndSound } =
+    useChessSounds();
+
+  // 1. DYNAMIC SOUND TRIGGERING LOGIC
+  // This plays the exact correct sound whenever you change moves!
+  const triggerMoveSound = (targetIndex) => {
+    if (targetIndex === 0 || !positions.length) return;
+
+    try {
+      const prevGame = new Chess(positions[targetIndex - 1]);
+      // Replay the move to inspect its properties (check, capture, etc.)
+      const moveResult = prevGame.move(moveHistory[targetIndex - 1]);
+
+      if (moveResult) {
+        if (prevGame.isGameOver()) {
+          playGameEndSound();
+        } else if (prevGame.isCheck()) {
+          playCheckSound();
+        } else if (moveResult.captured) {
+          playCaptureSound();
+        } else {
+          playMoveSound();
+        }
+      }
+    } catch (e) {
+      console.error("Sound playback error:", e);
+    }
+  };
+
   const goToFirst = () => {
     setMoveIndex(0);
   };
 
   const goToPrevious = () => {
-    setMoveIndex((prev) => Math.max(prev - 1, 0));
+    setMoveIndex((prev) => {
+      const nextIndex = Math.max(prev - 1, 0);
+      if (nextIndex !== prev) triggerMoveSound(nextIndex);
+      return nextIndex;
+    });
   };
 
   const goToNext = () => {
-    setMoveIndex((prev) => Math.min(prev + 1, positions.length - 1));
+    setMoveIndex((prev) => {
+      const nextIndex = Math.min(prev + 1, positions.length - 1);
+      if (nextIndex !== prev) triggerMoveSound(nextIndex);
+      return nextIndex;
+    });
   };
 
   const goToLast = () => {
-    setMoveIndex(positions.length - 1);
+    const lastIndex = positions.length - 1;
+    setMoveIndex((prev) => {
+      if (prev !== lastIndex) triggerMoveSound(lastIndex);
+      return lastIndex;
+    });
+  };
+
+  const getCustomSquareStyles = () => {
+    if (moveIndex === 0 || !positions.length) return {};
+
+    try {
+      const tempGame = new Chess(positions[moveIndex - 1]);
+      const moveData = tempGame.move(moveHistory[moveIndex - 1]);
+
+      if (moveData) {
+        return {
+          [moveData.from]: { backgroundColor: "rgba(255, 255, 0, 0.4)" },
+          [moveData.to]: { backgroundColor: "rgba(255, 255, 0, 0.4)" },
+        };
+      }
+    } catch (e) {
+      return {};
+    }
+    return {};
   };
 
   const movePairs = [];
@@ -92,30 +155,23 @@ const Analysis = () => {
 
   const { evaluation, bestMove, depth } = useStockfish(currentFen);
 
-  const readableBestMove = useMemo(() => {
-    if (!bestMove || bestMove.length < 4) return "-";
+  const isMate =
+    typeof evaluation === "string" &&
+    (evaluation.includes("M") || evaluation.includes("#"));
 
-    try {
-      const game = new Chess(positions[moveIndex]);
+  const isWhiteWinningMate = isMate
+    ? evaluation.includes("M0")
+      ? moveIndex % 2 !== 0
+      : evaluation.startsWith("+")
+    : false;
 
-      const move = game.move({
-        from: bestMove.slice(0, 2),
-        to: bestMove.slice(2, 4),
-        promotion: bestMove[4],
-      });
+  const numericEval = isMate ? 0 : Number(evaluation);
 
-      return move?.san || bestMove;
-    } catch {
-      return bestMove;
-    }
-  }, [bestMove, positions, moveIndex]);
-
-  const numericEval =
-    typeof evaluation === "string" && evaluation.startsWith("#")
-      ? 10
-      : Number(evaluation);
-
-  const barHeight = Math.min(Math.max(50 + numericEval * 8, 5), 95);
+  const barHeight = isMate
+    ? isWhiteWinningMate
+      ? 100
+      : 0
+    : Math.min(Math.max(50 + numericEval * 8, 5), 95);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white p-8">
@@ -125,8 +181,7 @@ const Analysis = () => {
 
       <div className="grid lg:grid-cols-[750px_1fr] gap-10">
         <div className="grid grid-cols-[20px_1fr] space-x-0">
-          {/* Eval Bar */}
-          <div className="w-5 h-175 bg-zinc-800 rounded-lg overflow-hidden relative">
+          <div className="w-5 h-175 bg-zinc-800 rounded-lg overflow-hidden relative flex flex-col justify-between">
             <div
               className="absolute bottom-0 w-full bg-white transition-all duration-300"
               style={{
@@ -134,18 +189,13 @@ const Analysis = () => {
               }}
             />
 
-            <div
-              className={`${evaluation === 0 ? "hidden" : "absolute inset-0 flex items-center justify-center text-[16px] font-bold rotate-90"} ${
-                evaluation > 0 ? "mt-8" : "mb-8"
-              }`}
-            >
-              <span className={evaluation > 0 ? `text-black` : `text-white`}>
-                {" "}
-                {evaluation > 0 ? "+" : ""}
-              </span>
-              <span className={evaluation > 0 ? `text-black` : `text-white`}>
-                {" "}
-                {evaluation}{" "}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span
+                className={`text-[13px] font-black uppercase tracking-wider rotate-90 whitespace-nowrap ${
+                  barHeight > 50 ? "text-black mt-8" : "text-white mb-8"
+                }`}
+              >
+                {evaluation}
               </span>
             </div>
           </div>
@@ -157,6 +207,8 @@ const Analysis = () => {
                   positions.length > 0 ? positions[moveIndex] : undefined
                 }
                 arePiecesDraggable={false}
+                animationDuration={250}
+                boardWidth={700}
               />
             </div>
 
@@ -212,12 +264,18 @@ const Analysis = () => {
           <div className="bg-zinc-800 flex gap-20 items-center rounded-xl p-4 mb-8">
             <div>
               <h3 className="text-zinc-400 text-sm">Engine Evaluation</h3>
-              <p className="text-2xl font-bold">{evaluation}</p>
+              <p className="text-2xl font-bold">
+                {typeof evaluation === "string" && evaluation.includes("M0")
+                  ? isWhiteWinningMate
+                    ? "1-0 (Mate)"
+                    : "0-1 (Mate)"
+                  : evaluation}
+              </p>
             </div>
 
             <div>
               <h3 className="text-zinc-400 text-sm">Best Move</h3>
-              <p className="text-xl font-semibold">{readableBestMove || "--"}</p>
+              <p className="text-xl font-semibold">{bestMove || "--"}</p>
             </div>
 
             <div>
@@ -235,7 +293,13 @@ const Analysis = () => {
                 <span className="w-10 text-zinc-500">{index + 1}.</span>
 
                 <button
-                  onClick={() => setMoveIndex(pair.whiteIndex)}
+                  onClick={() => {
+                    setMoveIndex(pair.whiteIndex - 1);
+                    delay(() => {
+                      setMoveIndex(pair.whiteIndex);
+                      triggerMoveSound(pair.whiteIndex);
+                    }, 300);
+                  }}
                   className={`flex-1 text-left px-2 py-1 rounded cursor-pointer ${
                     moveIndex === pair.whiteIndex
                       ? "bg-blue-600"
@@ -247,7 +311,13 @@ const Analysis = () => {
 
                 {pair.black && (
                   <button
-                    onClick={() => setMoveIndex(pair.blackIndex)}
+                    onClick={() => {
+                      setMoveIndex(pair.blackIndex - 1);
+                      delay(() => {
+                        setMoveIndex(pair.blackIndex);
+                        triggerMoveSound(pair.blackIndex);
+                      }, 300);
+                    }}
                     className={`flex-1 text-left px-2 py-1 rounded cursor-pointer ${
                       moveIndex === pair.blackIndex
                         ? "bg-blue-600"
