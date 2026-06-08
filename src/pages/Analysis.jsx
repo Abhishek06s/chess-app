@@ -2,6 +2,7 @@ import { useLocation } from "react-router-dom";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useEffect, useState, useRef } from "react";
+import { toast } from "react-hot-toast";
 
 import {
   ChevronLeft,
@@ -13,7 +14,7 @@ import {
 import openings from "../data/openings";
 import useChessSounds from "../hooks/useChessSounds";
 import useStockfish from "../hooks/useStockfish";
-import { buildMoveTree, MoveNode } from "../utils/moveTree";
+import { buildMoveTree, MoveNode, exportTreeToPgn } from "../utils/moveTree";
 
 const Analysis = () => {
   const { state } = useLocation();
@@ -21,15 +22,55 @@ const Analysis = () => {
   const [rootNode, setRootNode] = useState(null);
   const [currentNode, setCurrentNode] = useState(null);
   const [openingInfo, setOpeningInfo] = useState(null);
+  const [boardOrientation, setBoardOrientation] = useState("white");
+  const [showPgnModal, setShowPgnModal] = useState(false);
+  const [pgnInput, setPgnInput] = useState("");
+  const [pgnHeaders, setPgnHeaders] = useState({});
 
   const { playMoveSound, playCaptureSound, playCheckSound, playGameEndSound } =
     useChessSounds();
 
+  const loadPgn = (pgn = pgnInput) => {
+    const game = new Chess();
+    const headerMatches = pgnInput.match(/\[(.*?)\]/g) || [];
+
+    const headers = {};
+
+    headerMatches.forEach((line) => {
+      const match = line.match(/\[(\w+)\s+"(.*)"\]/);
+
+      if (match) {
+        headers[match[1]] = match[2];
+      }
+    });
+
+    setPgnHeaders(headers);
+    if (game.loadPgn(pgn.trim())) {
+      toast.message("PGN uploaded");
+    }
+
+    try {
+      game.loadPgn(pgn.trim());
+
+      const root = buildMoveTree(pgn);
+
+      setRootNode(root);
+      setCurrentNode(root);
+
+      setShowPgnModal(false);
+      setPgnInput("");
+      return true;
+    } catch (err) {
+      console.error(err);
+      toast.error("Invalid PGN");
+      return false;
+    }
+  };
+
   useEffect(() => {
-    if (!state?.pgn) return;
-    const root = buildMoveTree(state.pgn);
-    setRootNode(root);
-    setCurrentNode(root);
+    if (state?.pgn) {
+      loadPgn(state.pgn);
+    }
   }, [state]);
 
   const currentFen =
@@ -38,7 +79,10 @@ const Analysis = () => {
 
   useEffect(() => {
     const opening = openings[currentFen];
-    setOpeningInfo(opening || null);
+
+    if (opening) {
+      setOpeningInfo(opening);
+    }
   }, [currentFen]);
 
   const triggerMoveSound = (targetNode) => {
@@ -64,7 +108,6 @@ const Analysis = () => {
     }
   };
 
-
   const goToFirst = () => {
     if (rootNode) setCurrentNode(rootNode);
   };
@@ -72,6 +115,7 @@ const Analysis = () => {
   const goToParent = () => {
     if (currentNode?.parent) {
       setCurrentNode(currentNode.parent);
+      triggerMoveSound(currentNode);
     }
   };
 
@@ -96,7 +140,6 @@ const Analysis = () => {
       triggerMoveSound(curr);
     }
   };
-
 
   const createVariation = (
     sourceSquare,
@@ -214,6 +257,17 @@ const Analysis = () => {
       : 100
     : Math.min(Math.max(50 + numericEval * 8, 5), 95);
 
+  const evalBarStyle =
+    boardOrientation === "white"
+      ? {
+          bottom: 0,
+          height: `${barHeight}%`,
+        }
+      : {
+          top: 0,
+          height: `${barHeight}%`,
+        };
+
   const movesContainerRef = useRef(null);
   useEffect(() => {
     if (movesContainerRef.current) {
@@ -221,6 +275,17 @@ const Analysis = () => {
         movesContainerRef.current.scrollHeight;
     }
   }, [currentFen]);
+
+  const copyPgn = async () => {
+    if (!rootNode) return;
+
+    const pgn = exportTreeToPgn(rootNode, pgnHeaders);
+
+    await navigator.clipboard.writeText(pgn);
+
+    toast.success("PGN copied");
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-white p-8">
       <h1 className="text-3xl text-center font-bold mb-10 -mt-4">
@@ -231,14 +296,22 @@ const Analysis = () => {
         <div className="grid grid-cols-[30px_1fr] gap-4">
           <div className="w-6 h-150 bg-zinc-800 rounded-lg overflow-hidden relative flex flex-col justify-between border border-zinc-700">
             <div
-              className="absolute bottom-0 w-full bg-white transition-all duration-300"
-              style={{ height: `${barHeight}%` }}
+              className="absolute w-full bg-white transition-all duration-300"
+              style={evalBarStyle}
             />
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <span
-                className={`text-[11px] font-black uppercase tracking-wider rotate-90 whitespace-nowrap 
+                className={`text-[11px] font-black uppercase tracking-wider rotate-90 whitespace-nowrap
                   ${barHeight === 50 ? "hidden" : ""}
-                  ${barHeight > 50 ? "text-black mt-10" : "text-white mb-10"}`}
+                  ${
+                    boardOrientation === "white"
+                      ? barHeight > 50
+                        ? "text-black mt-10"
+                        : "text-white mb-10"
+                      : barHeight > 50
+                        ? "text-black mb-10"
+                        : "text-white mt-10"
+                  }`}
               >
                 {evaluation || "0.0"}
               </span>
@@ -249,6 +322,7 @@ const Analysis = () => {
             <div className="w-150 rounded-sm shadow-2xl">
               <Chessboard
                 position={currentFen}
+                boardOrientation={boardOrientation}
                 arePiecesDraggable={true}
                 animationDuration={200}
                 boardWidth={600}
@@ -285,13 +359,43 @@ const Analysis = () => {
                 <ChevronsRight size={24} />
               </button>
             </div>
+            <button
+              onClick={() =>
+                setBoardOrientation((prev) =>
+                  prev === "white" ? "black" : "white",
+                )
+              }
+              className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg mt-6 w-40 font-semibold cursor-pointer"
+            >
+              Flip
+            </button>
           </div>
         </div>
 
         <div className="bg-zinc-900 rounded-xl p-5 max-h-167.5 overflow-y-auto border border-zinc-800 flex flex-col gap-4">
-          <h2 className="text-xl text-center font-bold tracking-wide">
-            Move List
-          </h2>
+          <div className="flex justify-between">
+            <div>
+              <h2 className="text-xl font-bold tracking-wide mt-6 ml-4">
+                Move List
+              </h2>
+            </div>
+            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
+              <button
+                onClick={() => setShowPgnModal(true)}
+                className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-lg transition-colors cursor-pointer text-amber-300"
+              >
+                Load PGN
+              </button>
+            </div>
+            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 mr-4">
+              <button
+                onClick={copyPgn}
+                className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-lg transition-colors cursor-pointer text-blue-400"
+              >
+                Copy PGN
+              </button>
+            </div>
+          </div>
 
           {openingInfo && (
             <div className="bg-zinc-950/60 border border-emerald-900/40 rounded-xl p-4">
@@ -446,6 +550,44 @@ const Analysis = () => {
           )}
         </div>
       </div>
+
+      {showPgnModal && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-2xl">
+            <h2 className="text-xl font-bold mb-4">Load PGN</h2>
+
+            <textarea
+              value={pgnInput}
+              onChange={(e) => setPgnInput(e.target.value)}
+              placeholder="Paste PGN here..."
+              className="w-full h-60 bg-zinc-950 border border-zinc-700 rounded-lg p-3 resize-none outline-none"
+            />
+
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => {
+                  setShowPgnModal(false);
+                  setPgnInput("");
+                }}
+                className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-lg"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={() => {
+                  setShowPgnModal(false);
+                  loadPgn(pgnInput);
+                  toast.success("PGN Loaded");
+                }}
+                className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg"
+              >
+                Analyze
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -94,3 +94,65 @@ export function getSiblingVariations(node) {
   if (!node || !node.parent) return [];
   return node.parent.children;
 }
+
+function buildPgnRecursive(node, moveNumber = 1, isBlackMove = false) {
+  let pgn = "";
+
+  const children = node.children || [];
+
+  if (!children.length) {
+    return "";
+  }
+
+  const mainMove = children[0];
+
+  if (mainMove.san) {
+    if (!isBlackMove) {
+      pgn += `${moveNumber}. ${mainMove.san} `;
+    } else {
+      pgn += `${mainMove.san} `;
+    }
+  }
+
+  // Variations
+  for (let i = 1; i < children.length; i++) {
+    const variation = children[i];
+
+    let variationText = "";
+
+    if (!isBlackMove) {
+      variationText += `(${moveNumber}. ${variation.san}`;
+    } else {
+      variationText += `(${moveNumber}... ${variation.san}`;
+    }
+
+    variationText += " ";
+    variationText += buildPgnRecursive(
+      variation,
+      isBlackMove ? moveNumber + 1 : moveNumber,
+      !isBlackMove,
+    );
+
+    variationText += ") ";
+
+    pgn += variationText;
+  }
+
+  pgn += buildPgnRecursive(
+    mainMove,
+    isBlackMove ? moveNumber + 1 : moveNumber,
+    !isBlackMove,
+  );
+
+  return pgn;
+}
+
+export function exportTreeToPgn(root, headers = {}) {
+  const tags = Object.entries(headers)
+    .map(([key, value]) => `[${key} "${value}"]`)
+    .join("\n");
+
+  const moves = buildPgnRecursive(root).trim();
+
+  return `${tags}\n\n${moves}`;
+}
