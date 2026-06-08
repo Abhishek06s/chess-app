@@ -64,7 +64,7 @@ const Analysis = () => {
     }
   };
 
-  // --- Tree Navigation Controls ---
+
   const goToFirst = () => {
     if (rootNode) setCurrentNode(rootNode);
   };
@@ -97,7 +97,7 @@ const Analysis = () => {
     }
   };
 
-  // --- Handling User Moves / Variations ---
+
   const createVariation = (
     sourceSquare,
     targetSquare,
@@ -229,7 +229,7 @@ const Analysis = () => {
 
       <div className="grid lg:grid-cols-[700px_1fr] gap-10 max-w-7xl mx-auto">
         <div className="grid grid-cols-[30px_1fr] gap-4">
-          <div className="w-6 h-[600px] bg-zinc-800 rounded-lg overflow-hidden relative flex flex-col justify-between border border-zinc-700">
+          <div className="w-6 h-150 bg-zinc-800 rounded-lg overflow-hidden relative flex flex-col justify-between border border-zinc-700">
             <div
               className="absolute bottom-0 w-full bg-white transition-all duration-300"
               style={{ height: `${barHeight}%` }}
@@ -246,7 +246,7 @@ const Analysis = () => {
           </div>
 
           <div className="flex flex-col items-center">
-            <div className="w-[600px] rounded-sm overflow-hidden shadow-2xl">
+            <div className="w-150 rounded-sm shadow-2xl">
               <Chessboard
                 position={currentFen}
                 arePiecesDraggable={true}
@@ -255,11 +255,11 @@ const Analysis = () => {
                 customSquareStyles={getCustomSquareStyles()}
                 onPieceDrop={onPieceDrop}
                 onPromotionPieceSelect={handlePromotionSelect}
-                showPromotionDialog={true}
+                showPromotionDialog={false}
               />
             </div>
 
-            <div className="grid grid-cols-4 gap-2 mt-4 w-full max-w-[600px]">
+            <div className="grid grid-cols-4 gap-2 mt-4 w-full max-w-150">
               <button
                 onClick={goToFirst}
                 className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg flex justify-center transition-colors cursor-pointer"
@@ -288,7 +288,7 @@ const Analysis = () => {
           </div>
         </div>
 
-        <div className="bg-zinc-900 rounded-xl p-5 max-h-[670px] overflow-y-auto border border-zinc-800 flex flex-col gap-4">
+        <div className="bg-zinc-900 rounded-xl p-5 max-h-167.5 overflow-y-auto border border-zinc-800 flex flex-col gap-4">
           <h2 className="text-xl text-center font-bold tracking-wide">
             Move List
           </h2>
@@ -354,7 +354,7 @@ const Analysis = () => {
                       #{index + 1}
                     </span>
                     <span
-                      className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded min-w-[50px] text-center ${
+                      className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded min-w-12.5 text-center ${
                         line.eval.includes("-")
                           ? "bg-red-950/30 text-red-400"
                           : "bg-emerald-950/30 text-emerald-400"
@@ -372,7 +372,7 @@ const Analysis = () => {
           </div>
 
           <div
-            className="space-y-1.5 overflow-y-auto flex-1 max-h-[250px] pr-1"
+            className="space-y-1.5 overflow-y-auto flex-1 max-h-62.5 pr-1"
             ref={movesContainerRef}
           >
             {movePairs.map((pair, index) => (

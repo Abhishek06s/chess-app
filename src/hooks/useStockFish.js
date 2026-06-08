@@ -10,14 +10,44 @@ const useStockfish = (fen) => {
   const [topLines, setTopLines] = useState([]);
 
   useEffect(() => {
-    if (!fen || typeof fen !== "string" || fen.trim() === "" || fen.split(" ").length < 2) {
-      // Clear out older engine artifacts so the UI stays pristine while waiting
+    if (
+      !fen ||
+      typeof fen !== "string" ||
+      fen.trim() === "" ||
+      fen.split(" ").length < 2
+    ) {
       setEvaluation("0.00");
       setBestMove("-");
       setDepth(0);
       setTopLines([]);
       return;
     }
+
+    try {
+      const chessInstance = new Chess(fen);
+      if (chessInstance.isGameOver()) {
+        if (chessInstance.isCheckmate()) {
+          setEvaluation(chessInstance.turn() === "b" ? "1-0" : "0-1");
+        } else {
+          setEvaluation("1/2-1/2"); 
+        }
+        setBestMove("-");
+        setDepth(0);
+        setTopLines([]);
+
+        if (workerRef.current) {
+          workerRef.current.terminate();
+          workerRef.current = null;
+        }
+        return;
+      }
+    } catch (e) {
+      console.error("Game Over validation check failed:", e);
+    }
+
+    setBestMove("-"); 
+    setTopLines([]);
+    setDepth(0);
 
     if (workerRef.current) {
       workerRef.current.terminate();
@@ -56,9 +86,9 @@ const useStockfish = (fen) => {
         if (match) {
           let mateValue = Number(match[1]);
           if (sideToMove === "b") mateValue = -mateValue;
-          
+
           if (mateValue === 0) {
-            setEvaluation(sideToMove === "b" ? "+M0" : "-M0");
+            setEvaluation(sideToMove === "b" ? "1-0" : "0-1");
           } else {
             const prefix = mateValue > 0 ? "+" : "-";
             setEvaluation(`${prefix}M${Math.abs(mateValue)}`);
@@ -73,13 +103,13 @@ const useStockfish = (fen) => {
         if (pvIdxMatch && pvMovesMatch) {
           const idx = parseInt(pvIdxMatch[1], 10) - 1;
           const rawMoves = pvMovesMatch[1].split(" ");
-          
+
           try {
             const cleanGame = new Chess(fen);
             const readableMoves = [];
             const movesToParse = Math.min(rawMoves.length, 4);
 
-            for (let i = 0; i < Math.min(rawMoves.length, 4); i++) {
+            for (let i = 0; i < movesToParse; i++) {
               const m = rawMoves[i];
               if (!m || m.length < 4) continue;
               const moveObj = cleanGame.move({
@@ -98,41 +128,48 @@ const useStockfish = (fen) => {
                 if (sideToMove === "b") val = -val;
                 lineEval = val > 0 ? `+${val.toFixed(2)}` : val.toFixed(2);
               }
-            }
-
-            else if (line.includes("score mate")) {
+            } else if (line.includes("score mate")) {
               const mateMatch = line.match(/score mate (-?\d+)/);
               if (mateMatch) {
                 let val = Number(mateMatch[1]);
                 if (sideToMove === "b") val = -val;
-                lineEval = val > 0 ? `+M${Math.abs(val)}` : `-M${Math.abs(val)}`;
+                lineEval =
+                  val > 0 ? `+M${Math.abs(val)}` : `-M${Math.abs(val)}`;
               }
             }
 
             linesCache[idx] = {
               eval: lineEval,
-              continuation: readableMoves.join(" "),
+              continuation: readableMoves.length > 0 ? readableMoves.join(" ") : "Game Over",
             };
 
             setTopLines([...linesCache].filter(Boolean).slice(0, 3));
-          }
-          catch (e) {
-
-          }
+          } catch (e) {}
         }
       }
 
-      if (line.startsWith("bestmove") || line.includes("pv ")) {
-        let rawMove = "";
-        
-        if (line.startsWith("bestmove")) {
-          rawMove = line.split(" ")[1];
-        } 
-        else {
-          const pvMatch = line.match(/pv\s+([a-h][1-8][a-h][1-8][qrbn]?)/);
-          if (pvMatch) rawMove = pvMatch[1];
+      if (
+        line.includes(" depth ") &&
+        line.includes(" pv ") &&
+        line.includes("multipv 1 ")
+      ) {
+        const pvMatch = line.match(/ pv\s+([a-h][1-8][a-h][1-8][qrbn]?)/);
+        if (pvMatch && pvMatch[1]) {
+          const rawMove = pvMatch[1];
+          try {
+            const cleanGame = new Chess(fen);
+            const moveObj = cleanGame.move({
+              from: rawMove.slice(0, 2),
+              to: rawMove.slice(2, 4),
+              promotion: rawMove[4] || undefined,
+            });
+            if (moveObj) setBestMove(moveObj.san);
+          } catch (e) {}
         }
+      }
 
+      if (line.startsWith("bestmove")) {
+        const rawMove = line.split(" ")[1];
         if (rawMove && rawMove !== "(none)" && rawMove.length >= 4) {
           try {
             const cleanGame = new Chess(fen);
@@ -141,12 +178,11 @@ const useStockfish = (fen) => {
               to: rawMove.slice(2, 4),
               promotion: rawMove[4] || undefined,
             });
-            
             if (moveObj) setBestMove(moveObj.san);
           } catch (e) {
             setBestMove(rawMove);
           }
-        } else if (rawMove === "(none)") {
+        } else {
           setBestMove("-");
         }
       }
@@ -157,7 +193,6 @@ const useStockfish = (fen) => {
     worker.postMessage("isready");
     worker.postMessage(`position fen ${fen}`);
     worker.postMessage("go depth 22");
-
   }, [fen]);
 
   useEffect(() => {
