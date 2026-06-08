@@ -77,9 +77,11 @@ const useStockfish = (fen) => {
           try {
             const cleanGame = new Chess(fen);
             const readableMoves = [];
+            const movesToParse = Math.min(rawMoves.length, 4);
 
             for (let i = 0; i < Math.min(rawMoves.length, 4); i++) {
               const m = rawMoves[i];
+              if (!m || m.length < 4) continue;
               const moveObj = cleanGame.move({
                 from: m.slice(0, 2),
                 to: m.slice(2, 4),
@@ -131,7 +133,7 @@ const useStockfish = (fen) => {
           if (pvMatch) rawMove = pvMatch[1];
         }
 
-        if (rawMove && rawMove !== "(none)") {
+        if (rawMove && rawMove !== "(none)" && rawMove.length >= 4) {
           try {
             const cleanGame = new Chess(fen);
             const moveObj = cleanGame.move({

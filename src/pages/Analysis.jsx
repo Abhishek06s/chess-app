@@ -1,7 +1,7 @@
 import { useLocation } from "react-router-dom";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useRef } from "react";
 
 import {
   ChevronLeft,
@@ -13,65 +13,40 @@ import {
 import openings from "../data/openings";
 import useChessSounds from "../hooks/useChessSounds";
 import useStockfish from "../hooks/useStockfish";
-import { delay } from "framer-motion";
+import { buildMoveTree, MoveNode } from "../utils/moveTree";
 
 const Analysis = () => {
   const { state } = useLocation();
 
-  const [positions, setPositions] = useState([]);
-  const [moveIndex, setMoveIndex] = useState(0);
-  const [moveHistory, setMoveHistory] = useState([]);
+  const [rootNode, setRootNode] = useState(null);
+  const [currentNode, setCurrentNode] = useState(null);
   const [openingInfo, setOpeningInfo] = useState(null);
-
-  const buildPositions = (pgn) => {
-    const game = new Chess();
-    game.loadPgn(pgn);
-    const history = game.history();
-    const tempGame = new Chess();
-    const allPositions = [tempGame.fen()];
-
-    history.forEach((move) => {
-      tempGame.move(move);
-      allPositions.push(tempGame.fen());
-    });
-
-    return {
-      positions: allPositions,
-      history,
-    };
-  };
-
-  useEffect(() => {
-    if (!state?.pgn) return;
-
-    const { positions, history } = buildPositions(state.pgn);
-
-    setPositions(positions);
-    setMoveHistory(history);
-
-    setMoveIndex(0);
-  }, [state]);
-
-  useEffect(() => {
-    if (!positions.length) return;
-
-    const currentFen = positions[moveIndex];
-    const opening = openings[currentFen];
-
-    if (opening) {
-      setOpeningInfo(opening);
-    }
-  }, [moveIndex, positions]);
 
   const { playMoveSound, playCaptureSound, playCheckSound, playGameEndSound } =
     useChessSounds();
 
-  const triggerMoveSound = (targetIndex) => {
-    if (targetIndex === 0 || !positions.length) return;
+  useEffect(() => {
+    if (!state?.pgn) return;
+    const root = buildMoveTree(state.pgn);
+    setRootNode(root);
+    setCurrentNode(root);
+  }, [state]);
+
+  const currentFen =
+    currentNode?.fen ||
+    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+
+  useEffect(() => {
+    const opening = openings[currentFen];
+    setOpeningInfo(opening || null);
+  }, [currentFen]);
+
+  const triggerMoveSound = (targetNode) => {
+    if (!targetNode || !targetNode.parent) return;
 
     try {
-      const prevGame = new Chess(positions[targetIndex - 1]);
-      const moveResult = prevGame.move(moveHistory[targetIndex - 1]);
+      const prevGame = new Chess(targetNode.parent.fen);
+      const moveResult = prevGame.move(targetNode.san);
 
       if (moveResult) {
         if (prevGame.isGameOver()) {
@@ -89,214 +64,306 @@ const Analysis = () => {
     }
   };
 
+  // --- Tree Navigation Controls ---
   const goToFirst = () => {
-    setMoveIndex(0);
+    if (rootNode) setCurrentNode(rootNode);
   };
 
-  const goToPrevious = () => {
-    setMoveIndex((prev) => {
-      const nextIndex = Math.max(prev - 1, 0);
-      if (nextIndex !== prev) triggerMoveSound(nextIndex);
-      return nextIndex;
-    });
+  const goToParent = () => {
+    if (currentNode?.parent) {
+      setCurrentNode(currentNode.parent);
+    }
   };
 
-  const goToNext = () => {
-    setMoveIndex((prev) => {
-      const nextIndex = Math.min(prev + 1, positions.length - 1);
-      if (nextIndex !== prev) triggerMoveSound(nextIndex);
-      return nextIndex;
-    });
+  const goToMainChild = () => {
+    if (currentNode?.children?.length) {
+      const nextNode = currentNode.children[0];
+      setCurrentNode(nextNode);
+      triggerMoveSound(nextNode);
+    }
   };
 
   const goToLast = () => {
-    const lastIndex = positions.length - 1;
-    setMoveIndex((prev) => {
-      if (prev !== lastIndex) triggerMoveSound(lastIndex);
-      return lastIndex;
-    });
+    let curr = currentNode;
+    if (!curr) return;
+
+    while (curr.children && curr.children.length > 0) {
+      curr = curr.children[0];
+    }
+
+    if (curr !== currentNode) {
+      setCurrentNode(curr);
+      triggerMoveSound(curr);
+    }
+  };
+
+  // --- Handling User Moves / Variations ---
+  const createVariation = (
+    sourceSquare,
+    targetSquare,
+    promotionPiece = "q",
+    isFromDialog = false,
+  ) => {
+    if (!currentNode) return false;
+
+    const gameForCheck = new Chess(currentFen);
+    const pieceOnSource = gameForCheck.get(sourceSquare);
+    const isPawn = pieceOnSource && pieceOnSource.type === "p";
+    const isPromotionRank = targetSquare[1] === "8" || targetSquare[1] === "1";
+
+    if (isPawn && isPromotionRank && !isFromDialog) {
+      return true;
+    }
+
+    const game = new Chess(currentFen);
+
+    try {
+      const move = game.move({
+        from: sourceSquare,
+        to: targetSquare,
+        promotion: promotionPiece,
+      });
+
+      if (!move) return false;
+
+      const existingChild = currentNode.children.find(
+        (child) => child.san === move.san,
+      );
+
+      if (existingChild) {
+        setCurrentNode(existingChild);
+        triggerMoveSound(existingChild);
+        return true;
+      }
+
+      const variationNode = new MoveNode({
+        id: crypto.randomUUID(),
+        fen: game.fen(),
+        san: move.san,
+        move,
+        parent: currentNode,
+      });
+
+      currentNode.children.push(variationNode);
+      setCurrentNode(variationNode);
+      triggerMoveSound(variationNode);
+
+      return true;
+    } catch (e) {
+      console.error("Validation blocked:", e);
+      return false;
+    }
+  };
+
+  const onPieceDrop = (sourceSquare, targetSquare) => {
+    return createVariation(sourceSquare, targetSquare, "q", false);
+  };
+
+  const handlePromotionSelect = (piece, promoteFromSquare, promoteToSquare) => {
+    if (!piece) return false;
+    const promotionPieceLetter = piece[1].toLowerCase();
+
+    return createVariation(
+      promoteFromSquare,
+      promoteToSquare,
+      promotionPieceLetter,
+      true,
+    );
   };
 
   const getCustomSquareStyles = () => {
-    if (moveIndex === 0 || !positions.length) return {};
-
-    try {
-      const tempGame = new Chess(positions[moveIndex - 1]);
-      const moveData = tempGame.move(moveHistory[moveIndex - 1]);
-
-      if (moveData) {
-        return {
-          [moveData.from]: { backgroundColor: "rgba(255, 255, 0, 0.4)" },
-          [moveData.to]: { backgroundColor: "rgba(255, 255, 0, 0.4)" },
-        };
-      }
-    } catch (e) {
-      return {};
-    }
-    return {};
+    if (!currentNode || !currentNode.move) return {};
+    const { from, to } = currentNode.move;
+    return {
+      [from]: { backgroundColor: "rgba(255, 255, 0, 0.4)" },
+      [to]: { backgroundColor: "rgba(255, 255, 0, 0.4)" },
+    };
   };
 
-  const movePairs = [];
+  const getPathFromRoot = () => {
+    const path = [];
+    let curr = currentNode;
+    while (curr && curr.parent) {
+      path.unshift(curr);
+      curr = curr.parent;
+    }
+    return path;
+  };
 
-  for (let i = 0; i < moveHistory.length; i += 2) {
+  const currentPath = getPathFromRoot();
+
+  const movePairs = [];
+  for (let i = 0; i < currentPath.length; i += 2) {
     movePairs.push({
-      white: moveHistory[i],
-      black: moveHistory[i + 1] || "",
-      whiteIndex: i + 1,
-      blackIndex: i + 2,
+      whiteNode: currentPath[i],
+      blackNode: currentPath[i + 1] || null,
+      moveNumber: Math.floor(i / 2) + 1,
     });
   }
-
-  const currentFen =
-    positions && positions.length > 0
-      ? positions[moveIndex]
-      : "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
   const { evaluation, bestMove, depth, topLines } = useStockfish(currentFen);
 
   const isMate =
     typeof evaluation === "string" &&
     (evaluation.includes("M") || evaluation.includes("#"));
-
-  const isWhiteWinningMate = isMate
-    ? evaluation.includes("M0")
-      ? moveIndex % 2 !== 0
-      : evaluation.startsWith("+")
-    : false;
-
-  const numericEval = isMate ? 0 : Number(evaluation);
+  const numericEval = isMate ? 0 : Number(evaluation || 0);
 
   const barHeight = isMate
-    ? isWhiteWinningMate
-      ? 100
-      : 0
+    ? evaluation.includes("-")
+      ? 0
+      : 100
     : Math.min(Math.max(50 + numericEval * 8, 5), 95);
 
+  const movesContainerRef = useRef(null);
+  useEffect(() => {
+    if (movesContainerRef.current) {
+      movesContainerRef.current.scrollTop =
+        movesContainerRef.current.scrollHeight;
+    }
+  }, [currentFen]);
   return (
     <div className="min-h-screen bg-zinc-950 text-white p-8">
       <h1 className="text-3xl text-center font-bold mb-10 -mt-4">
         Analysis Board
       </h1>
 
-      <div className="grid lg:grid-cols-[750px_1fr] gap-10">
-        <div className="grid grid-cols-[20px_1fr] space-x-0">
-          <div className="w-5 h-175 bg-zinc-800 rounded-lg overflow-hidden relative flex flex-col justify-between">
+      <div className="grid lg:grid-cols-[700px_1fr] gap-10 max-w-7xl mx-auto">
+        <div className="grid grid-cols-[30px_1fr] gap-4">
+          <div className="w-6 h-[600px] bg-zinc-800 rounded-lg overflow-hidden relative flex flex-col justify-between border border-zinc-700">
             <div
               className="absolute bottom-0 w-full bg-white transition-all duration-300"
-              style={{
-                height: `${barHeight}%`,
-              }}
+              style={{ height: `${barHeight}%` }}
             />
-
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <span
-                className={`text-[13px] font-black uppercase tracking-wider rotate-90 whitespace-nowrap ${
-                  barHeight > 50 ? "text-black mt-8" : "text-white mb-8"
-                }`}
+                className={`text-[11px] font-black uppercase tracking-wider rotate-90 whitespace-nowrap 
+                  ${barHeight === 50 ? "hidden" : ""}
+                  ${barHeight > 50 ? "text-black mt-10" : "text-white mb-10"}`}
               >
-                {evaluation}
+                {evaluation || "0.0"}
               </span>
             </div>
           </div>
 
           <div className="flex flex-col items-center">
-            <div className="w-full max-w-175 rounded-xs">
+            <div className="w-[600px] rounded-sm overflow-hidden shadow-2xl">
               <Chessboard
                 position={currentFen}
-                arePiecesDraggable={false}
-                animationDuration={250}
-                boardWidth={700}
+                arePiecesDraggable={true}
+                animationDuration={200}
+                boardWidth={600}
                 customSquareStyles={getCustomSquareStyles()}
+                onPieceDrop={onPieceDrop}
+                onPromotionPieceSelect={handlePromotionSelect}
+                showPromotionDialog={true}
               />
             </div>
 
-            <div className="grid grid-cols-4 gap-2 mt-4 w-full max-w-175">
+            <div className="grid grid-cols-4 gap-2 mt-4 w-full max-w-[600px]">
               <button
                 onClick={goToFirst}
-                className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg flex justify-center cursor-pointer"
+                className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg flex justify-center transition-colors cursor-pointer"
               >
-                <ChevronsLeft size={32} />
+                <ChevronsLeft size={24} />
               </button>
-
               <button
-                onClick={goToPrevious}
-                className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg flex justify-center cursor-pointer"
+                onClick={goToParent}
+                className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg flex justify-center transition-colors cursor-pointer"
               >
-                <ChevronLeft size={32} />
+                <ChevronLeft size={24} />
               </button>
-
               <button
-                onClick={goToNext}
-                className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg flex justify-center cursor-pointer"
+                onClick={goToMainChild}
+                className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg flex justify-center transition-colors cursor-pointer"
               >
-                <ChevronRight size={32} />
+                <ChevronRight size={24} />
               </button>
-
               <button
                 onClick={goToLast}
-                className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg flex justify-center cursor-pointer"
+                className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg flex justify-center transition-colors cursor-pointer"
               >
-                <ChevronsRight size={32} />
+                <ChevronsRight size={24} />
               </button>
             </div>
-
-            <p className="mt-4 text-zinc-400">
-              Move {moveIndex} / {Math.max(positions.length - 1, 0)}
-            </p>
           </div>
         </div>
 
-        <div className="bg-zinc-900 rounded-xl p-4 max-h-200 overflow-y-auto">
-          <h2 className="text-2xl text-center font-bold mt-4 mb-4">
+        <div className="bg-zinc-900 rounded-xl p-5 max-h-[670px] overflow-y-auto border border-zinc-800 flex flex-col gap-4">
+          <h2 className="text-xl text-center font-bold tracking-wide">
             Move List
           </h2>
+
           {openingInfo && (
-            <div className="w-full max-w-175 mb-4 bg-zinc-900 rounded-xl p-4">
-              <h2 className="text-xl font-bold text-green-400">
+            <div className="bg-zinc-950/60 border border-emerald-900/40 rounded-xl p-4">
+              <h2 className="text-lg font-bold text-emerald-400">
                 {openingInfo.name}
               </h2>
-
-              <p className="text-zinc-400">ECO: {openingInfo.eco}</p>
+              <p className="text-xs text-zinc-400 font-mono mt-0.5">
+                ECO: {openingInfo.eco}
+              </p>
             </div>
           )}
 
-          <div className="mt-4 bg-zinc-900 border border-zinc-800 rounded-xl p-4 shadow-lg">
+          <div className="bg-zinc-950/40 border border-zinc-800 flex justify-between items-center rounded-xl p-4">
+            <div>
+              <h3 className="text-zinc-500 text-xs uppercase tracking-wider font-semibold">
+                Evaluation
+              </h3>
+              <p className="text-xl font-bold mt-1 font-mono text-zinc-200">
+                {evaluation || "0.0"}
+              </p>
+            </div>
+            <div>
+              <h3 className="text-zinc-500 text-xs uppercase tracking-wider font-semibold">
+                Best Move
+              </h3>
+              <p className="text-xl font-mono font-bold mt-1 text-blue-400">
+                {bestMove || "--"}
+              </p>
+            </div>
+            <div>
+              <h3 className="text-zinc-500 text-xs uppercase tracking-wider font-semibold">
+                Depth
+              </h3>
+              <p className="text-sm font-mono font-bold text-zinc-400 mt-1">
+                {depth || "0"}
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-zinc-950/20 border border-zinc-800/80 rounded-xl p-4">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-zinc-400 text-sm font-bold tracking-wider uppercase">
+              <h3 className="text-zinc-400 text-xs font-bold tracking-wider uppercase">
                 Top Engine Variations
               </h3>
-              <span className="text-xs bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded-md font-mono">
+              <span className="text-[10px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded font-mono">
                 Multi-PV
               </span>
             </div>
 
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-2">
               {topLines.length === 0 ? (
-                <p className="text-sm text-zinc-500 italic animate-pulse">
-                  Calculating candidate lines...
-                </p>
+                <p className="text-xs text-zinc-500 italic">Thinking...</p>
               ) : (
                 topLines.map((line, index) => (
                   <div
                     key={index}
-                    className="flex items-center gap-3 bg-zinc-950/50 p-2.5 rounded-lg border border-zinc-800/40 hover:border-zinc-700/60 transition-colors"
+                    className="flex items-center gap-3 bg-zinc-950/70 p-2 rounded-lg border border-zinc-800/60"
                   >
-                    <span className="text-xs font-black text-zinc-600 w-4">
+                    <span className="text-xs font-bold text-zinc-600 w-4">
                       #{index + 1}
                     </span>
-
                     <span
-                      className={`text-xs font-mono font-extrabold px-2 py-1 rounded min-w-13.5 text-center ${
+                      className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded min-w-[50px] text-center ${
                         line.eval.includes("-")
-                          ? "bg-red-950/40 text-red-400 border border-red-900/30"
-                          : "bg-emerald-950/40 text-emerald-400 border border-emerald-900/30"
+                          ? "bg-red-950/30 text-red-400"
+                          : "bg-emerald-950/30 text-emerald-400"
                       }`}
                     >
                       {line.eval}
                     </span>
-
-                    <p className="text-sm font-medium text-zinc-300 font-mono tracking-wide truncate flex-1">
-                      {line.continuation || "Calculating moves..."}
+                    <p className="text-xs font-mono text-zinc-400 truncate flex-1">
+                      {line.continuation || "..."}
                     </p>
                   </div>
                 ))
@@ -304,75 +371,79 @@ const Analysis = () => {
             </div>
           </div>
 
-          <div className="bg-zinc-800 flex gap-20 items-center rounded-xl p-4 mb-8">
-            <div>
-              <h3 className="text-zinc-400 text-sm">Engine Evaluation</h3>
-              <p className="text-2xl font-bold">
-                {typeof evaluation === "string" && evaluation.includes("M0")
-                  ? isWhiteWinningMate
-                    ? "1-0 (Mate)"
-                    : "0-1 (Mate)"
-                  : evaluation}
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-zinc-400 text-sm">Best Move</h3>
-              <p className="text-xl font-semibold">{bestMove || "--"}</p>
-            </div>
-
-            <div>
-              {" "}
-              <p className="text-zinc-400 text-sm mt-2">Depth: {depth}</p>
-            </div>
-          </div>
-
-          <div className="space-y-2">
+          <div
+            className="space-y-1.5 overflow-y-auto flex-1 max-h-[250px] pr-1"
+            ref={movesContainerRef}
+          >
             {movePairs.map((pair, index) => (
               <div
                 key={index}
-                className="bg-zinc-800 px-3 py-2 rounded-lg flex items-center"
+                className="bg-zinc-950/40 px-3 py-1.5 rounded-md flex items-center text-sm border border-zinc-800/30"
               >
-                <span className="w-10 text-zinc-500">{index + 1}.</span>
+                <span className="w-9 text-zinc-600 font-mono text-xs">
+                  {pair.moveNumber}.
+                </span>
 
                 <button
                   onClick={() => {
-                    setMoveIndex(pair.whiteIndex - 1);
-                    delay(() => {
-                      setMoveIndex(pair.whiteIndex);
-                      triggerMoveSound(pair.whiteIndex);
-                    }, 300);
+                    setCurrentNode(pair.whiteNode);
+                    triggerMoveSound(pair.whiteNode);
                   }}
-                  className={`flex-1 text-left px-2 py-1 rounded cursor-pointer ${
-                    moveIndex === pair.whiteIndex
-                      ? "bg-blue-600"
-                      : "hover:bg-zinc-700"
+                  className={`flex-1 text-left px-2 py-1 rounded font-mono transition-colors ${
+                    currentNode?.id === pair.whiteNode.id
+                      ? "bg-blue-600 text-white font-bold"
+                      : "hover:bg-zinc-800 text-zinc-300"
                   }`}
                 >
-                  {pair.white}
+                  {pair.whiteNode.san}
                 </button>
 
-                {pair.black && (
+                {pair.blackNode ? (
                   <button
                     onClick={() => {
-                      setMoveIndex(pair.blackIndex - 1);
-                      delay(() => {
-                        setMoveIndex(pair.blackIndex);
-                        triggerMoveSound(pair.blackIndex);
-                      }, 300);
+                      setCurrentNode(pair.blackNode);
+                      triggerMoveSound(pair.blackNode);
                     }}
-                    className={`flex-1 text-left px-2 py-1 rounded cursor-pointer ${
-                      moveIndex === pair.blackIndex
-                        ? "bg-blue-600"
-                        : "hover:bg-zinc-700"
+                    className={`flex-1 text-left px-2 py-1 rounded font-mono transition-colors ${
+                      currentNode?.id === pair.blackNode.id
+                        ? "bg-blue-600 text-white font-bold"
+                        : "hover:bg-zinc-800 text-zinc-300"
                     }`}
                   >
-                    {pair.black}
+                    {pair.blackNode.san}
                   </button>
+                ) : (
+                  <span className="flex-1"></span>
                 )}
               </div>
             ))}
           </div>
+
+          {currentNode?.parent && currentNode.parent.children.length > 1 && (
+            <div className="bg-zinc-950/60 p-3 rounded-xl border border-zinc-800">
+              <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">
+                Alternative Branches
+              </h3>
+              <div className="flex gap-2 flex-wrap">
+                {currentNode.parent.children.map((variation) => (
+                  <button
+                    key={variation.id}
+                    onClick={() => {
+                      setCurrentNode(variation);
+                      triggerMoveSound(variation);
+                    }}
+                    className={`px-2.5 py-1 text-xs font-mono rounded transition-colors ${
+                      variation.id === currentNode.id
+                        ? "bg-blue-600 font-bold text-white"
+                        : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                    }`}
+                  >
+                    {variation.san}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
