@@ -3,6 +3,7 @@ import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { useEffect, useState, useRef } from "react";
 import { toast } from "react-hot-toast";
+import { useNavigate } from "react-router-dom";
 
 import {
   ChevronLeft,
@@ -18,6 +19,7 @@ import { buildMoveTree, MoveNode, exportTreeToPgn } from "../utils/moveTree";
 
 const Analysis = () => {
   const { state } = useLocation();
+  const navigate = useNavigate();
 
   const [rootNode, setRootNode] = useState(null);
   const [currentNode, setCurrentNode] = useState(null);
@@ -359,16 +361,31 @@ const Analysis = () => {
                 <ChevronsRight size={24} />
               </button>
             </div>
-            <button
-              onClick={() =>
-                setBoardOrientation((prev) =>
-                  prev === "white" ? "black" : "white",
-                )
-              }
-              className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg mt-6 w-40 font-semibold cursor-pointer"
-            >
-              Flip
-            </button>
+            <div className="flex gap-6">
+              <button
+                onClick={() =>
+                  setBoardOrientation((prev) =>
+                    prev === "white" ? "black" : "white",
+                  )
+                }
+                className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg mt-6 w-40 font-semibold cursor-pointer"
+              >
+                Flip
+              </button>
+
+              <button
+                onClick={() =>
+                  navigate("/review", {
+                    state: {
+                      pgn: exportTreeToPgn(rootNode , pgnHeaders),
+                    },
+                  })
+                }
+                className="bg-green-500 hover:bg-green-400 transition-all duration-200 px-4 py-2 rounded-lg mt-6 cursor-pointer"
+              >
+                Review Game
+              </button>
+            </div>
           </div>
         </div>
 

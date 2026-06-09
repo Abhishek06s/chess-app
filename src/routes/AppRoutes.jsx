@@ -6,6 +6,7 @@ import Profile from "../pages/Profile";
 import Leaderboard from "../pages/Leaderboard";
 import Navbar from "../components/Navbar";
 import Analysis from "../pages/Analysis";
+import GameReview from "../pages/GameReview";
 
 export default function AppRoutes() {
   return (
@@ -53,6 +54,16 @@ export default function AppRoutes() {
           <div className="min-h-screen bg-zinc-950 text-white">
             <Navbar />
             <Analysis />
+          </div>
+        }
+      />
+
+      <Route
+        path="/review"
+        element={
+          <div className="min-h-screen bg-zinc-950 text-white">
+            <Navbar />
+            <GameReview />
           </div>
         }
       />
