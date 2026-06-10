@@ -11,17 +11,7 @@ import {
   Repeat,
 } from "react-feather";
 
-import {
-  Star,
-  Check,
-  ThumbsUp,
-  BookOpen,
-  HelpCircle,
-  AlertTriangle,
-  Target,
-  X,
-  KeyRound,
-} from "lucide-react";
+import { Star, Check, ThumbsUp, BookOpen, X, KeyRound } from "lucide-react";
 
 const GameReview = () => {
   const { state } = useLocation();
@@ -43,13 +33,25 @@ const GameReview = () => {
       </span>
     ),
     Best: <Star size={12} fill="currentColor" strokeWidth={1} />,
-    Excellent: <Check size={14} strokeWidth={3} />,
-    Good: <ThumbsUp size={11} fill="currentColor" />,
+    Excellent: <ThumbsUp size={11} fill="currentColor" />,
+    Good: <Check size={14} strokeWidth={3} />,
     Book: <BookOpen size={12} fill="currentColor" />,
-    Inaccuracy: <HelpCircle size={14} strokeWidth={2.5} />,
-    Mistake: <AlertTriangle size={13} strokeWidth={2.5} />,
-    Miss: <Target size={13} strokeWidth={2.5} />,
-    Blunder: <X size={14} strokeWidth={3} />,
+    Inaccuracy: (
+      <span className="font-extrabold text-[11px] tracking-tighter leading-none select-none">
+        !?
+      </span>
+    ),
+    Mistake: (
+      <span className="font-extrabold text-[11px] tracking-tighter leading-none select-none">
+        ?
+      </span>
+    ),
+    Miss: <X size={14} strokeWidth={3} />,
+    Blunder: (
+      <span className="font-extrabold text-[11px] tracking-tighter leading-none select-none">
+        ??
+      </span>
+    ),
     Forced: <KeyRound size={11} strokeWidth={2.5} />,
   };
 
@@ -85,43 +87,6 @@ const GameReview = () => {
     currentReview?.fenAfter ||
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
-  const classifyMove = ({ evalBefore, evalAfter, side, isTopMove, isOnlyMove, isBookMove }) => {
-    if (isBookMove) return { classification: "Book", cpl: 0 };
-
-    const standardizeEval = (val, sideToMove) => {
-      if (typeof val === "string") {
-        const isMateMinus = val.includes("-");
-        const baseValue = 9999;
-        if (sideToMove === "white") return isMateMinus ? -baseValue : baseValue;
-        return isMateMinus ? baseValue : -baseValue;
-      }
-      return Number(val);
-    };
-
-    const scoreBefore = standardizeEval(evalBefore, side);
-    const scoreAfter = standardizeEval(evalAfter, side);
-    const loss = side === "white" ? scoreBefore - scoreAfter : scoreAfter - scoreBefore;
-
-    if (isTopMove) {
-      if (isOnlyMove && Math.abs(loss) <= 0.1 && Math.abs(scoreAfter) > 2.5) {
-        return { classification: "Great", cpl: Math.max(0, loss) };
-      }
-      return { classification: "Best", cpl: Math.max(0, loss) };
-    }
-
-    if (loss <= 0.10) return { classification: "Best", cpl: Math.max(0, loss) };
-    if (loss <= 0.30) return { classification: "Excellent", cpl: loss };
-    if (loss <= 0.60) return { classification: "Good", cpl: loss };
-    if (loss <= 1.20) return { classification: "Inaccuracy", cpl: loss };
-    if (loss <= 2.50) {
-      if (Math.abs(scoreBefore) > 3.0 && Math.abs(scoreAfter) <= 1.0) {
-        return { classification: "Miss", cpl: loss };
-      }
-      return { classification: "Mistake", cpl: loss };
-    }
-    return { classification: "Blunder", cpl: loss };
-  };
-
   useEffect(() => {
     if (!state?.pgn) return;
 
@@ -130,25 +95,8 @@ const GameReview = () => {
 
       try {
         const results = await generateGameReview(state.pgn, analyzePosition);
-        
-        const updatedResults = results.map((move) => {
-          const rating = classifyMove({
-            evalBefore: move.evalBefore,
-            evalAfter: move.evalAfter,
-            side: move.side,
-            isTopMove: move.isTopMove || false,
-            isOnlyMove: move.isOnlyMove || false,
-            isBookMove: move.isBookMove || false,
-          });
 
-          return {
-            ...move,
-            classification: rating.classification, 
-            cpl: rating.cpl,                       
-          };
-        });
-
-        setReviewData(updatedResults);
+        setReviewData(results);
       } catch (error) {
         console.error("Game review failed:", error);
       } finally {
@@ -165,12 +113,9 @@ const GameReview = () => {
     const counts = {
       Brilliant: 0,
       Great: 0,
-      Book: 0,
       Best: 0,
-      Excellent: 0,
-      Good: 0,
-      Inaccuracy: 0,
       Mistake: 0,
+      Miss: 0,
       Blunder: 0,
     };
 
@@ -190,24 +135,27 @@ const GameReview = () => {
     if (!moves || moves.length === 0) return "0.0";
 
     const evaluatedMoves = moves.filter(
-      (m) => m.classification !== "Book" && m.classification !== "Forced"
+      (move) =>
+        move.classification !== "Book" && move.classification !== "Forced",
     );
+
     if (evaluatedMoves.length === 0) return "100.0";
 
-    const totalCPL = evaluatedMoves.reduce((sum, move) => {
-      const cplVal = Number(move.cpl);
-      return sum + (Number.isNaN(cplVal) ? 0 : cplVal);
+    const totalAccuracyScore = evaluatedMoves.reduce((sum, move) => {
+      const loss = move.accuracyLoss ?? 0;
+      const moveAccuracy = 100 * Math.exp(-4 * loss);
+      return sum + moveAccuracy;
     }, 0);
 
-    const avgCPL = totalCPL / evaluatedMoves.length;
-    const accuracy = 100 * Math.exp(-0.0018 * avgCPL);
-    return Math.max(0, Math.min(100, accuracy)).toFixed(1);
+    const finalAccuracy = totalAccuracyScore / evaluatedMoves.length;
+    return Math.min(100, Math.max(0, finalAccuracy)).toFixed(1);
   };
 
   const goToFirst = () => setCurrentIndex(0);
   const goToPrev = () => setCurrentIndex((prev) => Math.max(prev - 1, 0));
-  const goToNext = () => setCurrentIndex((prev) => Math.min(prev + 1, reviewData.length - 1));
-  const goToLast = () => setCurrentIndex(reviewData.length - 1);
+  const goToNext = () =>
+    setCurrentIndex((prev) => Math.min(prev + 1, reviewData.length - 1));
+  const goToLast = () => setCurrentIndex(Math.max(reviewData.length - 1, 0));
 
   if (isReviewing) {
     return (
@@ -229,7 +177,6 @@ const GameReview = () => {
         Game Review
       </h1>
       <div className="grid lg:grid-cols-[750px_1fr] gap-10 max-w-7xl mx-auto">
-        
         {/* Left Side: Board and Navigation Controls */}
         <div className="flex flex-col items-center gap-2">
           <div
@@ -280,7 +227,11 @@ const GameReview = () => {
             </button>
 
             <button
-              onClick={() => setBoardOrientation((prev) => (prev === "white" ? "black" : "white"))}
+              onClick={() =>
+                setBoardOrientation((prev) =>
+                  prev === "white" ? "black" : "white",
+                )
+              }
               title="Flip Board"
               className="bg-zinc-800 hover:bg-zinc-700 px-4 rounded-lg flex items-center justify-center transition-colors cursor-pointer text-white"
             >
@@ -296,7 +247,11 @@ const GameReview = () => {
               <h3 className="font-bold mb-2">⚪ White</h3>
 
               <p className="text-blue-400 font-bold mb-4">
-                Accuracy: {calculateAccuracy(reviewData.filter((m) => m.side === "white"))}%
+                Accuracy:{" "}
+                {calculateAccuracy(
+                  reviewData.filter((m) => m.side === "white"),
+                )}
+                %
               </p>
 
               {Object.entries(whiteSummary).map(([key, value]) => (
@@ -321,7 +276,11 @@ const GameReview = () => {
               <h3 className="font-bold mb-2">⚫ Black</h3>
 
               <p className="text-blue-400 font-bold mb-4">
-                Accuracy: {calculateAccuracy(reviewData.filter((m) => m.side === "black"))}%
+                Accuracy:{" "}
+                {calculateAccuracy(
+                  reviewData.filter((m) => m.side === "black"),
+                )}
+                %
               </p>
 
               {Object.entries(blackSummary).map(([key, value]) => (
@@ -383,8 +342,8 @@ const GameReview = () => {
                     ? typeof currentReview.evalAfter === "string"
                       ? currentReview.evalAfter.replace("M-", "-M")
                       : currentReview.evalAfter > 0
-                      ? `+${currentReview.evalAfter}`
-                      : currentReview.evalAfter
+                        ? `+${currentReview.evalAfter}`
+                        : currentReview.evalAfter
                     : "-"}
                 </span>
               </div>
@@ -413,7 +372,9 @@ const GameReview = () => {
 
                     {pair.white && (
                       <button
-                        onClick={() => setCurrentIndex(reviewData.indexOf(pair.white))}
+                        onClick={() =>
+                          setCurrentIndex(reviewData.indexOf(pair.white))
+                        }
                         className={`flex items-center text-left p-2 rounded transition cursor-pointer ${
                           currentIndex === reviewData.indexOf(pair.white)
                             ? "bg-blue-600 font-bold text-white"
@@ -431,7 +392,9 @@ const GameReview = () => {
 
                     {pair.black ? (
                       <button
-                        onClick={() => setCurrentIndex(reviewData.indexOf(pair.black))}
+                        onClick={() =>
+                          setCurrentIndex(reviewData.indexOf(pair.black))
+                        }
                         className={`flex items-center text-left p-2 rounded transition cursor-pointer ${
                           currentIndex === reviewData.indexOf(pair.black)
                             ? "bg-blue-600 font-bold text-white"

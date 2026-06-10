@@ -1,97 +1,94 @@
 import { Chess } from "chess.js";
-
-/**
- * Classifies a chess move based on Chess.com criteria using Centipawn Loss (CPL)
- * @param {number|string} evalBefore - Evaluation before the move (number or string like "M3")
- * @param {number|string} evalAfter - Evaluation after the move (number or string like "M3")
- * @param {string} side - "white" or "black"
- * @param {boolean} isTopMove - True if this was Stockfish's top recommended choice
- * @param {boolean} isOnlyMove - True if this was the only legal or non-blundering move
- * @param {boolean} isBookMove - True if found in an opening database
- * @returns {Object} { classification: string, cpl: number }
- */
+import openingBook from "../data/openings"; 
 
 const analysisCache = new Map();
 
 async function getAnalysis(fen, depth, analyzePosition) {
   const key = `${fen}-${depth}`;
-  if (analysisCache.has(key)) {
-    return analysisCache.get(key);
-  }
+  if (analysisCache.has(key)) return analysisCache.get(key);
   const result = await analyzePosition(fen, depth);
   analysisCache.set(key, result);
   return result;
 }
 
-function calculateCPL(evalBefore, evalAfter, side) {
-  if (
-    typeof evalBefore === "string" || 
-    typeof evalAfter === "string" || 
-    Math.abs(Number(evalBefore)) === 9999 || 
-    Math.abs(Number(evalAfter)) === 9999
-  ) {
-    return 0; 
+function evalToExpectedPoints(evalScore, side) {
+  if (typeof evalScore === "string") {
+    const isWhiteWinningMate = evalScore.startsWith("M") && !evalScore.startsWith("M-");
+    const isBlackWinningMate = evalScore.startsWith("-M") || evalScore.startsWith("M-");
+    if (side === "white") return isWhiteWinningMate ? 1.0 : 0.0;
+    return isBlackWinningMate ? 1.0 : 0.0;
   }
-
-  const before = Number(evalBefore);
-  const after = Number(evalAfter);
-
-  if (Number.isNaN(before) || Number.isNaN(after)) return 0;
-
-  const loss = side === "white" ? before - after : after - before;
-  return Math.max(0, Math.round(loss * 100));
+  const cp = Number(evalScore) * 100;
+  if (Number.isNaN(cp)) return 0.5;
+  const whiteWinProb = 1 / (1 + Math.exp(-0.00368208 * cp));
+  return side === "white" ? whiteWinProb : 1 - whiteWinProb;
 }
 
-export function classifyMove({ evalBefore, evalAfter, side, isTopMove, isOnlyMove, isBookMove }) {
-  if (isBookMove) {
-    return { classification: "Book", cpl: 0 };
-  }
-
-  const standardizeEval = (val, sideToMove) => {
-    if (typeof val === "string") {
-      const isMateMinus = val.includes("-");
-      const baseValue = 9999;
-      if (sideToMove === "white") {
-        return isMateMinus ? -baseValue : baseValue;
-      } else {
-        return isMateMinus ? baseValue : -baseValue;
+function getMaterialCount(chessInstance) {
+  const values = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+  let whiteMaterial = 0;
+  let blackMaterial = 0;
+  chessInstance.board().forEach((row) => {
+    row.forEach((piece) => {
+      if (piece) {
+        if (piece.color === "w") whiteMaterial += values[piece.type];
+        else blackMaterial += values[piece.type];
       }
+    });
+  });
+  return { whiteMaterial, blackMaterial };
+}
+
+function cleanFenForBook(fen) {
+  return fen.split(" ").slice(0, 4).join(" ");
+}
+
+export function classifyMove({
+  evalBefore,
+  evalAfter,
+  side,
+  isTopMove,
+  isBookMove,
+  wasOpponentError,
+  isSacrifice,
+  isGreatMoveCandidate,
+  isForced,
+}) {
+  if (isBookMove) return { classification: "Book", accuracyLoss: 0 };
+  if (isForced) return { classification: "Forced", accuracyLoss: 0 };
+
+  if (typeof evalAfter === "string") {
+    const isWhiteDeliveringMate = side === "white" && evalAfter.startsWith("M") && !evalAfter.startsWith("M-");
+    const isBlackDeliveringMate = side === "black" && (evalAfter.startsWith("-M") || evalAfter.startsWith("M-"));
+    if (isWhiteDeliveringMate || isBlackDeliveringMate) {
+      return { classification: "Best", accuracyLoss: 0 };
     }
-    return Number(val);
-  };
-
-  const scoreBefore = standardizeEval(evalBefore, side);
-  const scoreAfter = standardizeEval(evalAfter, side);
-
-  const cpl = side === "white" ? scoreBefore - scoreAfter : scoreAfter - scoreBefore;
-
-  if (isTopMove) {
-    if (isOnlyMove && Math.abs(cpl) <= 0.1 && Math.abs(scoreAfter) > 2.5) {
-      return { classification: "Great", cpl: Math.max(0, cpl) };
-    }
-    return { classification: "Best", cpl: Math.max(0, cpl) };
   }
 
-  if (cpl <= 0.10) {
-    return { classification: "Best", cpl: Math.max(0, cpl) };
-  }
-  if (cpl <= 0.30) {
-    return { classification: "Excellent", cpl };
-  }
-  if (cpl <= 0.60) {
-    return { classification: "Good", cpl };
-  }
-  if (cpl <= 1.20) {
-    return { classification: "Inaccuracy", cpl };
-  }
-  if (cpl <= 2.50) {
-    if (Math.abs(scoreBefore) > 3.0 && Math.abs(scoreAfter) <= 1.0) {
-      return { classification: "Miss", cpl };
-    }
-    return { classification: "Mistake", cpl };
-  }
+  const beforeEP = evalToExpectedPoints(evalBefore, side);
+  const afterEP = evalToExpectedPoints(evalAfter, side);
+  const loss = Math.max(0, beforeEP - afterEP);
+
+  const numericBefore = typeof evalBefore === "string" ? (evalBefore.includes("-") ? -99 : 99) : Number(evalBefore);
   
-  return { classification: "Blunder", cpl };
+  // --- DEFINITION: BRILLIANT (!!) ---
+  const isAlreadyWinningBefore = side === "white" ? numericBefore > 3.0 : numericBefore < -3.0;
+  if (isTopMove && isSacrifice && !isAlreadyWinningBefore && afterEP >= 0.40 && loss <= 0.02) {
+    return { classification: "Brilliant", accuracyLoss: loss };
+  }
+
+  // --- DEFINITION: GREAT (!) ---
+  if (isTopMove && isGreatMoveCandidate && loss <= 0.02) {
+    return { classification: "Great", accuracyLoss: loss };
+  }
+
+  if (wasOpponentError && loss > 0.15) return { classification: "Miss", accuracyLoss: loss };
+  if (loss <= 0.01) return { classification: "Best", accuracyLoss: loss };
+  if (loss <= 0.03) return { classification: "Excellent", accuracyLoss: loss };
+  if (loss <= 0.07) return { classification: "Good", accuracyLoss: loss };
+  if (loss <= 0.15) return { classification: "Inaccuracy", accuracyLoss: loss };
+  if (loss <= 0.30) return { classification: "Mistake", accuracyLoss: loss };
+  return { classification: "Blunder", accuracyLoss: loss };
 }
 
 export async function generateGameReview(pgn, analyzePosition) {
@@ -110,15 +107,135 @@ export async function generateGameReview(pgn, analyzePosition) {
 
   for (let i = 0; i < moves.length; i++) {
     const move = moves[i];
+    const side = move.color === "w" ? "white" : "black";
+
     const fenBefore = replay.fen();
-    const engineBefore = await getAnalysis(fenBefore, 13, analyzePosition);
+    const cleanFenBefore = cleanFenForBook(fenBefore);
+
+    const legalMovesCount = replay.moves().length;
+    const isForced = legalMovesCount === 1;
+
+    const materialBefore = getMaterialCount(replay);
+    
+    // CRITICAL: Bumped base depth from 12 to 16 to find brilliant sacrificing lines
+    const engineBefore = await getAnalysis(fenBefore, 16, analyzePosition);
+
+    let isBookMove = false;
+    if (openingBook && i < 30) {
+      const pgnArray = [];
+      for (let j = 0; j <= i; j++) {
+        if (j % 2 === 0) pgnArray.push(`${Math.floor(j / 2) + 1}.`);
+        pgnArray.push(moves[j].san);
+      }
+      const standardPgnString = pgnArray.join(" ");
+      const rawMovesString = moves.slice(0, i + 1).map(m => m.san).join(" ");
+
+      if (
+        openingBook[standardPgnString] || 
+        openingBook[rawMovesString] || 
+        openingBook[cleanFenBefore]
+      ) {
+        isBookMove = true;
+      }
+    }
 
     replay.move(move);
     const fenAfter = replay.fen();
-    const engineAfter = await getAnalysis(fenAfter, 13, analyzePosition);
+    const materialAfter = getMaterialCount(replay);
+    const engineAfter = await getAnalysis(fenAfter, 16, analyzePosition);
 
-    const side = i % 2 === 0 ? "white" : "black";
-    const cpl = calculateCPL(engineBefore.evaluation, engineAfter.evaluation, side);
+    const calculatedPlayerMove = `${move.from}${move.to}${move.promotion || ""}`.toLowerCase().trim();
+    const rawEngineMove = String(engineBefore.bestMoveRaw || engineBefore.bestMove || "").toLowerCase().trim();
+    const isTopMove = rawEngineMove.includes(calculatedPlayerMove) || calculatedPlayerMove.includes(rawEngineMove);
+
+    let isSacrifice = false;
+    if (side === "white" && materialAfter.whiteMaterial < materialBefore.whiteMaterial) {
+      isSacrifice = true;
+    } else if (side === "black" && materialAfter.blackMaterial < materialBefore.blackMaterial) {
+      isSacrifice = true;
+    }
+
+    let isRecapture = false;
+    if (i > 0 && move.captured) {
+      const prevMove = moves[i - 1];
+      if (prevMove.captured && prevMove.to === move.to) {
+        isRecapture = true;
+      }
+    }
+
+    // --- GREAT MOVE PIPELINE VALIDATION ---
+    let isGreatMoveCandidate = false;
+    if (isTopMove && !isForced && !isBookMove && !isRecapture) {
+      
+      const evalBeforeNum = Number(engineBefore.evaluation);
+      const evalAfterNum = Number(engineAfter.evaluation);
+
+      if (!Number.isNaN(evalBeforeNum) && !Number.isNaN(evalAfterNum)) {
+        const positionalSurge = side === "white" 
+          ? (evalAfterNum - evalBeforeNum) 
+          : (evalBeforeNum - evalAfterNum);
+
+        const whiteMaterialDelta = materialAfter.whiteMaterial - materialBefore.whiteMaterial;
+        const blackMaterialDelta = materialAfter.blackMaterial - materialBefore.blackMaterial;
+        const materialGained = side === "white" ? Math.abs(blackMaterialDelta) : Math.abs(whiteMaterialDelta);
+
+        const topMoveExpectedPoints = evalToExpectedPoints(engineAfter.evaluation, side);
+        let passesProportionalIsolationCheck = false;
+
+        if (engineBefore.alternativeMoveLoss !== undefined) {
+          const expectedLossOfAlternative = Number(engineBefore.alternativeMoveLoss);
+          const alternativeExpectedPoints = topMoveExpectedPoints - expectedLossOfAlternative;
+          
+          if (alternativeExpectedPoints < (topMoveExpectedPoints * 0.20)) {
+            passesProportionalIsolationCheck = true;
+          }
+        } else {
+          // Single-line fallback: checks if you find a major advantage shift (Qh3)
+          // or if you hold a balanced game safely together without collapsing
+          const isSharpTurningPoint = positionalSurge >= 1.0;
+          const isPreciseBalanceHold = Math.abs(evalBeforeNum) <= 1.2 && Math.abs(evalAfterNum) <= 1.0;
+          
+          if (isSharpTurningPoint || isPreciseBalanceHold) {
+            passesProportionalIsolationCheck = true;
+          }
+        }
+
+        if (passesProportionalIsolationCheck) {
+          const isPositionalAdvantageGreat = !move.captured && !replay.isCheckmate() && positionalSurge >= 1.0;
+          const isProtectedCaptureGreat = move.captured && materialGained === 0 && positionalSurge >= 0.5;
+          const isBalancedBefore = Math.abs(evalBeforeNum) <= 1.5;
+          const isSavedAfter = side === "white" ? evalAfterNum >= -0.5 : evalAfterNum <= 0.5;
+          const isGameLifeline = isBalancedBefore && isSavedAfter;
+
+          // Exclude already completely crushing position states (stops endgame flood bugs)
+          if ((isPositionalAdvantageGreat || isProtectedCaptureGreat || isGameLifeline) && Math.abs(evalBeforeNum) <= 3.0) {
+            isGreatMoveCandidate = true;
+          }
+        }
+      }
+    }
+
+    let wasOpponentError = false;
+    if (i > 0) {
+      const prevMove = review[i - 1];
+      wasOpponentError = ["Inaccuracy", "Mistake", "Blunder", "Miss"].includes(prevMove.classification);
+    }
+
+    let moveData = classifyMove({
+      evalBefore: engineBefore.evaluation,
+      evalAfter: engineAfter.evaluation,
+      side,
+      isTopMove,
+      isBookMove,
+      wasOpponentError,
+      isSacrifice,
+      isGreatMoveCandidate,
+      isForced,
+    });
+
+    if (replay.isCheckmate()) {
+      moveData = { classification: "Best", accuracyLoss: 0 };
+    }
 
     review.push({
       moveNumber: Math.floor(i / 2) + 1,
@@ -127,15 +244,15 @@ export async function generateGameReview(pgn, analyzePosition) {
       fenBefore,
       fenAfter,
       evalBefore: engineBefore.evaluation,
-      evalAfter: engineAfter.evaluation,
+      evalAfter: replay.isCheckmate() ? (side === "white" ? "M0" : "-M0") : engineAfter.evaluation,
       bestMove: engineBefore.bestMove,
-      cpl,
-      classification: classifyMove(cpl),
+      accuracyLoss: moveData.accuracyLoss,
+      classification: moveData.classification,
     });
   }
 
   for (const move of review) {
-    if (["Inaccuracy", "Mistake", "Blunder"].includes(move.classification)) {
+    if (["Inaccuracy", "Mistake", "Miss", "Blunder"].includes(move.classification)) {
       const deeper = await getAnalysis(move.fenBefore, 18, analyzePosition);
       move.bestMove = deeper.bestMove;
     }
