@@ -1,5 +1,10 @@
 import { Chess } from "chess.js";
-import openingBook from "../data/openings"; 
+import {
+  isGreatMove,
+  getOpponentAttacks,
+  seenGreatPositions,
+} from "./greatMoveDetector";
+import openingBook from "../data/openings";
 
 const analysisCache = new Map();
 
@@ -13,8 +18,10 @@ async function getAnalysis(fen, depth, analyzePosition) {
 
 function evalToExpectedPoints(evalScore, side) {
   if (typeof evalScore === "string") {
-    const isWhiteWinningMate = evalScore.startsWith("M") && !evalScore.startsWith("M-");
-    const isBlackWinningMate = evalScore.startsWith("-M") || evalScore.startsWith("M-");
+    const isWhiteWinningMate =
+      evalScore.startsWith("M") && !evalScore.startsWith("M-");
+    const isBlackWinningMate =
+      evalScore.startsWith("-M") || evalScore.startsWith("M-");
     if (side === "white") return isWhiteWinningMate ? 1.0 : 0.0;
     return isBlackWinningMate ? 1.0 : 0.0;
   }
@@ -50,49 +57,35 @@ export function classifyMove({
   isTopMove,
   isBookMove,
   wasOpponentError,
-  isSacrifice,
+  opponentErrorGain,
   isGreatMoveCandidate,
   isForced,
 }) {
   if (isBookMove) return { classification: "Book", accuracyLoss: 0 };
   if (isForced) return { classification: "Forced", accuracyLoss: 0 };
 
-  if (typeof evalAfter === "string") {
-    const isWhiteDeliveringMate = side === "white" && evalAfter.startsWith("M") && !evalAfter.startsWith("M-");
-    const isBlackDeliveringMate = side === "black" && (evalAfter.startsWith("-M") || evalAfter.startsWith("M-"));
-    if (isWhiteDeliveringMate || isBlackDeliveringMate) {
-      return { classification: "Best", accuracyLoss: 0 };
-    }
-  }
-
   const beforeEP = evalToExpectedPoints(evalBefore, side);
   const afterEP = evalToExpectedPoints(evalAfter, side);
   const loss = Math.max(0, beforeEP - afterEP);
 
-  const numericBefore = typeof evalBefore === "string" ? (evalBefore.includes("-") ? -99 : 99) : Number(evalBefore);
-  
-  // --- DEFINITION: BRILLIANT (!!) ---
-  const isAlreadyWinningBefore = side === "white" ? numericBefore > 3.0 : numericBefore < -3.0;
-  if (isTopMove && isSacrifice && !isAlreadyWinningBefore && afterEP >= 0.40 && loss <= 0.02) {
-    return { classification: "Brilliant", accuracyLoss: loss };
-  }
-
-  // --- DEFINITION: GREAT (!) ---
   if (isTopMove && isGreatMoveCandidate && loss <= 0.02) {
     return { classification: "Great", accuracyLoss: loss };
   }
 
-  if (wasOpponentError && loss > 0.15) return { classification: "Miss", accuracyLoss: loss };
-  if (loss <= 0.01) return { classification: "Best", accuracyLoss: loss };
-  if (loss <= 0.03) return { classification: "Excellent", accuracyLoss: loss };
-  if (loss <= 0.07) return { classification: "Good", accuracyLoss: loss };
-  if (loss <= 0.15) return { classification: "Inaccuracy", accuracyLoss: loss };
-  if (loss <= 0.30) return { classification: "Mistake", accuracyLoss: loss };
+  if (wasOpponentError && loss > 0.09 && loss <= opponentErrorGain)
+    return { classification: "Miss", accuracyLoss: loss };
+  if (isTopMove || loss <= 0.003) return { classification: "Best", accuracyLoss: loss };
+  if (loss <= 0.01) return { classification: "Excellent", accuracyLoss: loss };
+  if (loss <= 0.03) return { classification: "Good", accuracyLoss: loss };
+  if (loss <= 0.08) return { classification: "Inaccuracy", accuracyLoss: loss };
+  if (loss <= 0.25) return { classification: "Mistake", accuracyLoss: loss };
   return { classification: "Blunder", accuracyLoss: loss };
 }
 
-export async function generateGameReview(pgn, analyzePosition) {
+export async function generateGameReview(pgn, analyzePosition, onProgress) {
   analysisCache.clear();
+  seenGreatPositions.clear();
+
   const game = new Chess();
 
   try {
@@ -105,54 +98,30 @@ export async function generateGameReview(pgn, analyzePosition) {
   const review = [];
   const replay = new Chess();
 
+  const totalSteps = moves.length + 1;
+
   for (let i = 0; i < moves.length; i++) {
+    if (typeof onProgress === "function") {
+      onProgress(Math.round((i / totalSteps) * 100));
+    }
+
     const move = moves[i];
     const side = move.color === "w" ? "white" : "black";
 
     const fenBefore = replay.fen();
-    const cleanFenBefore = cleanFenForBook(fenBefore);
-
     const legalMovesCount = replay.moves().length;
     const isForced = legalMovesCount === 1;
 
-    const materialBefore = getMaterialCount(replay);
-    
-    // CRITICAL: Bumped base depth from 12 to 16 to find brilliant sacrificing lines
-    const engineBefore = await getAnalysis(fenBefore, 16, analyzePosition);
-
-    let isBookMove = false;
-    if (openingBook && i < 30) {
-      const pgnArray = [];
-      for (let j = 0; j <= i; j++) {
-        if (j % 2 === 0) pgnArray.push(`${Math.floor(j / 2) + 1}.`);
-        pgnArray.push(moves[j].san);
-      }
-      const standardPgnString = pgnArray.join(" ");
-      const rawMovesString = moves.slice(0, i + 1).map(m => m.san).join(" ");
-
-      if (
-        openingBook[standardPgnString] || 
-        openingBook[rawMovesString] || 
-        openingBook[cleanFenBefore]
-      ) {
-        isBookMove = true;
-      }
-    }
+    const engineBefore = await getAnalysis(fenBefore, 14, analyzePosition);
 
     replay.move(move);
     const fenAfter = replay.fen();
-    const materialAfter = getMaterialCount(replay);
-    const engineAfter = await getAnalysis(fenAfter, 16, analyzePosition);
-
-    const calculatedPlayerMove = `${move.from}${move.to}${move.promotion || ""}`.toLowerCase().trim();
-    const rawEngineMove = String(engineBefore.bestMoveRaw || engineBefore.bestMove || "").toLowerCase().trim();
-    const isTopMove = rawEngineMove.includes(calculatedPlayerMove) || calculatedPlayerMove.includes(rawEngineMove);
-
-    let isSacrifice = false;
-    if (side === "white" && materialAfter.whiteMaterial < materialBefore.whiteMaterial) {
-      isSacrifice = true;
-    } else if (side === "black" && materialAfter.blackMaterial < materialBefore.blackMaterial) {
-      isSacrifice = true;
+    let isBookMove = false;
+    if (openingBook) {
+      const currentFullFen = replay.fen();
+      if (openingBook[currentFullFen]) {
+        isBookMove = true;
+      }
     }
 
     let isRecapture = false;
@@ -163,62 +132,60 @@ export async function generateGameReview(pgn, analyzePosition) {
       }
     }
 
-    // --- GREAT MOVE PIPELINE VALIDATION ---
-    let isGreatMoveCandidate = false;
-    if (isTopMove && !isForced && !isBookMove && !isRecapture) {
-      
-      const evalBeforeNum = Number(engineBefore.evaluation);
-      const evalAfterNum = Number(engineAfter.evaluation);
+    const engineAfter = await getAnalysis(fenAfter, 14, analyzePosition);
 
-      if (!Number.isNaN(evalBeforeNum) && !Number.isNaN(evalAfterNum)) {
-        const positionalSurge = side === "white" 
-          ? (evalAfterNum - evalBeforeNum) 
-          : (evalBeforeNum - evalAfterNum);
+    const calculatedPlayerMove = `${move.from}${move.to}${move.promotion || ""}`
+      .toLowerCase()
+      .trim();
+    const rawEngineMove = String(
+      engineBefore.bestMoveRaw || engineBefore.bestMove || "",
+    )
+      .toLowerCase()
+      .trim();
+    const isTopMove =
+      rawEngineMove.includes(calculatedPlayerMove) ||
+      calculatedPlayerMove.includes(rawEngineMove);
 
-        const whiteMaterialDelta = materialAfter.whiteMaterial - materialBefore.whiteMaterial;
-        const blackMaterialDelta = materialAfter.blackMaterial - materialBefore.blackMaterial;
-        const materialGained = side === "white" ? Math.abs(blackMaterialDelta) : Math.abs(whiteMaterialDelta);
-
-        const topMoveExpectedPoints = evalToExpectedPoints(engineAfter.evaluation, side);
-        let passesProportionalIsolationCheck = false;
-
-        if (engineBefore.alternativeMoveLoss !== undefined) {
-          const expectedLossOfAlternative = Number(engineBefore.alternativeMoveLoss);
-          const alternativeExpectedPoints = topMoveExpectedPoints - expectedLossOfAlternative;
-          
-          if (alternativeExpectedPoints < (topMoveExpectedPoints * 0.20)) {
-            passesProportionalIsolationCheck = true;
-          }
-        } else {
-          // Single-line fallback: checks if you find a major advantage shift (Qh3)
-          // or if you hold a balanced game safely together without collapsing
-          const isSharpTurningPoint = positionalSurge >= 1.0;
-          const isPreciseBalanceHold = Math.abs(evalBeforeNum) <= 1.2 && Math.abs(evalAfterNum) <= 1.0;
-          
-          if (isSharpTurningPoint || isPreciseBalanceHold) {
-            passesProportionalIsolationCheck = true;
-          }
-        }
-
-        if (passesProportionalIsolationCheck) {
-          const isPositionalAdvantageGreat = !move.captured && !replay.isCheckmate() && positionalSurge >= 1.0;
-          const isProtectedCaptureGreat = move.captured && materialGained === 0 && positionalSurge >= 0.5;
-          const isBalancedBefore = Math.abs(evalBeforeNum) <= 1.5;
-          const isSavedAfter = side === "white" ? evalAfterNum >= -0.5 : evalAfterNum <= 0.5;
-          const isGameLifeline = isBalancedBefore && isSavedAfter;
-
-          // Exclude already completely crushing position states (stops endgame flood bugs)
-          if ((isPositionalAdvantageGreat || isProtectedCaptureGreat || isGameLifeline) && Math.abs(evalBeforeNum) <= 3.0) {
-            isGreatMoveCandidate = true;
-          }
-        }
-      }
-    }
+    const isGreatMoveCandidate = await isGreatMove({
+      fenBefore,
+      move,
+      side,
+      evalBefore: engineBefore.evaluation,
+      evalAfter: engineAfter.evaluation,
+      isTopMove,
+      isForced,
+      isBookMove,
+      isRecapture,
+      analyzePosition,
+      getAnalysis,
+      evalToExpectedPoints,
+      getOpponentAttacks,
+      seenGreatPositions,
+      cleanFenForBook,
+    });
 
     let wasOpponentError = false;
+    let opponentErrorGain = 0;
     if (i > 0) {
       const prevMove = review[i - 1];
-      wasOpponentError = ["Inaccuracy", "Mistake", "Blunder", "Miss"].includes(prevMove.classification);
+      wasOpponentError = ["Inaccuracy", "Mistake", "Blunder", "Miss"].includes(
+        prevMove.classification,
+      );
+
+      if (wasOpponentError) {
+        const yourEPBeforeOpponentMove = evalToExpectedPoints(
+          prevMove.evalBefore,
+          side,
+        );
+        const yourEPAfterOpponentMove = evalToExpectedPoints(
+          engineBefore.evaluation,
+          side,
+        );
+        opponentErrorGain = Math.max(
+          0,
+          yourEPAfterOpponentMove - yourEPBeforeOpponentMove,
+        );
+      }
     }
 
     let moveData = classifyMove({
@@ -228,7 +195,7 @@ export async function generateGameReview(pgn, analyzePosition) {
       isTopMove,
       isBookMove,
       wasOpponentError,
-      isSacrifice,
+      opponentErrorGain,
       isGreatMoveCandidate,
       isForced,
     });
@@ -244,18 +211,33 @@ export async function generateGameReview(pgn, analyzePosition) {
       fenBefore,
       fenAfter,
       evalBefore: engineBefore.evaluation,
-      evalAfter: replay.isCheckmate() ? (side === "white" ? "M0" : "-M0") : engineAfter.evaluation,
+      evalAfter: replay.isCheckmate()
+        ? side === "white"
+          ? "M0"
+          : "-M0"
+        : engineAfter.evaluation,
       bestMove: engineBefore.bestMove,
       accuracyLoss: moveData.accuracyLoss,
       classification: moveData.classification,
     });
   }
 
-  for (const move of review) {
-    if (["Inaccuracy", "Mistake", "Miss", "Blunder"].includes(move.classification)) {
-      const deeper = await getAnalysis(move.fenBefore, 18, analyzePosition);
-      move.bestMove = deeper.bestMove;
+  const badMoves = review.filter((move) =>
+    ["Inaccuracy", "Mistake", "Miss", "Blunder"].includes(move.classification),
+  );
+
+  for (let i = 0; i < badMoves.length; i++) {
+    const move = badMoves[i];
+    const deeper = await getAnalysis(move.fenBefore, 18, analyzePosition);
+    move.bestMove = deeper.bestMove;
+
+    if (typeof onProgress === "function") {
+      onProgress(95 + Math.round(((i + 1) / badMoves.length) * 5));
     }
+  }
+
+  if (typeof onProgress === "function") {
+    onProgress(100);
   }
 
   return review;

@@ -1,1 +1,26 @@
 @import "tailwindcss";
+
+@theme {
+  --animate-pop-snap: popAndSnap 0.7s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+
+  @keyframes popAndSnap {
+    0% {
+      top: 50%;
+      right: 50%;
+      transform: translate(50%, -50%) scale(0);
+      opacity: 0;
+    }
+    35%, 55% {
+      top: 50%;
+      right: 50%;
+      transform: translate(50%, -50%) scale(2);
+      opacity: 1;
+    }
+    100% {
+      top: 0.25rem;
+      right: 0.25rem;
+      transform: translate(0, 0) scale(1.15);
+      opacity: 1;
+    }
+  }
+}
