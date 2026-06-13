@@ -105,10 +105,12 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
   const replay = new Chess();
 
   const totalSteps = moves.length + 1;
+  let prevEngineBefore = null;
+  let prevEngineAfter = null;
 
   for (let i = 0; i < moves.length; i++) {
     if (typeof onProgress === "function") {
-      onProgress(Math.round((i / totalSteps) * 100));
+      onProgress(Math.round((i / totalSteps) * 95));
     }
 
     const move = moves[i];
@@ -118,7 +120,7 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
     const legalMovesCount = replay.moves().length;
     const isForced = legalMovesCount === 1;
 
-    const engineBefore = await getAnalysis(fenBefore, 14, analyzePosition);
+    const engineBefore = await getAnalysis(fenBefore, 13, analyzePosition);
 
     replay.move(move);
     const fenAfter = replay.fen();
@@ -138,7 +140,7 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
       }
     }
 
-    const engineAfter = await getAnalysis(fenAfter, 14, analyzePosition);
+    const engineAfter = await getAnalysis(fenAfter, 13, analyzePosition);
 
     const calculatedPlayerMove = `${move.from}${move.to}${move.promotion || ""}`
       .toLowerCase()
@@ -148,7 +150,7 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
     )
       .toLowerCase()
       .trim();
-      
+
     const isTopMove =
       rawEngineMove.includes(calculatedPlayerMove) ||
       calculatedPlayerMove.includes(rawEngineMove);
@@ -204,6 +206,8 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
       getAnalysis,
       myPreviousMoveCategory,
       opponentEvalDrop,
+      prevEvalBefore: prevEngineBefore ? prevEngineBefore.evaluation : null,
+      prevEvalAfter: prevEngineAfter ? prevEngineAfter.evaluation : null,
     });
 
     let wasOpponentError = false;
@@ -263,6 +267,9 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
       accuracyLoss: moveData.accuracyLoss,
       classification: moveData.classification,
     });
+
+    prevEngineBefore = engineBefore;
+    prevEngineAfter = engineAfter;
   }
 
   const badMoves = review.filter((move) =>

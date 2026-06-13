@@ -14,10 +14,14 @@ export async function isBrilliantMove({
   analyzePosition,
   getAnalysis,
   myPreviousMoveCategory,
-  opponentEvalDrop
+  opponentEvalDrop,
+  prevEvalBefore,
+  prevEvalAfter,
 }) {
   const evalBeforeNum = Number(evalBefore);
   let evalAfterNum = Number(evalAfter);
+  const prevEvalBeforeNum = prevEvalBefore ? Number(prevEvalBefore) : 0;
+  const prevEvalAfterNum = prevEvalAfter ? Number(prevEvalAfter) : 0;
 
   let parsedEvalBefore = evalBeforeNum;
   if (typeof evalBefore === "string") {
@@ -114,10 +118,10 @@ export async function isBrilliantMove({
 
           if (attacksOnSquare.length > 0) {
             const attackedByLesser = attacksOnSquare.some(
-              (m) => (PIECE_VALUES[m.piece] || 0) < pieceValue,
+              (m) =>
+                m.piece !== "k" && (PIECE_VALUES[m.piece] || 0) < pieceValue,
             );
             let isUndefended = false;
-
             if (!attackedByLesser) {
               const defTestChess = new Chess();
               defTestChess.clear();
@@ -166,7 +170,7 @@ export async function isBrilliantMove({
       const tempChess = new Chess(fenAfter);
       const currentBoard = tempChess.board();
       let totalPieces = 0;
-      
+
       for (let r = 0; r < 8; r++) {
         for (let c = 0; c < 8; c++) {
           if (currentBoard[r][c]) totalPieces++;
@@ -178,14 +182,22 @@ export async function isBrilliantMove({
   }
 
   // --- FAKE SACRIFICE AFTER A BLUNDER GUARD ---
-  if (myPreviousMoveCategory && opponentEvalDrop !== undefined && !isNaN(parsedEvalAfter)) {
+  if (
+    myPreviousMoveCategory &&
+    opponentEvalDrop !== undefined &&
+    !isNaN(parsedEvalAfter)
+  ) {
     const badMoves = ["mistake", "miss", "blunder"];
-    
-    if (badMoves.includes(myPreviousMoveCategory.toLowerCase()) && opponentEvalDrop <= 0.5) {
-      const isStillWorse = side === "white" ? parsedEvalAfter < -0.3 : parsedEvalAfter > 0.3;
-      
+
+    if (
+      badMoves.includes(myPreviousMoveCategory.toLowerCase()) &&
+      opponentEvalDrop <= 0.5
+    ) {
+      const isStillWorse =
+        side === "white" ? parsedEvalAfter < -0.3 : parsedEvalAfter > 0.3;
+
       if (isStillWorse) {
-        return false; 
+        return false;
       }
     }
   }
@@ -200,8 +212,8 @@ export async function isBrilliantMove({
     !isNaN(parsedEvalAfter)
   ) {
     const evalGain = isWhite
-      ? parsedEvalAfter - parsedEvalBefore
-      : parsedEvalBefore - parsedEvalAfter;
+      ? prevEvalAfterNum - prevEvalBeforeNum
+      : prevEvalBeforeNum - prevEvalAfterNum;
 
     if (evalGain <= 1.2) {
       const sandboxChess = new Chess(fenAfter);
@@ -251,6 +263,12 @@ export async function isBrilliantMove({
       ? parsedEvalBefore > 5.5
       : parsedEvalBefore < -5.5;
 
+    const getMateDistance = (evalStr) => {
+      if (typeof evalStr !== "string" || !evalStr.includes("M")) return null;
+      const dist = parseInt(evalStr.replace(/[^\d]/g, ""), 10);
+      return isNaN(dist) ? null : dist;
+    };
+
     if (isOverwhelming && analyzePosition && getAnalysis && fenBefore) {
       const sandboxChess = new Chess(fenBefore);
       const calculatedPlayerMove =
@@ -267,6 +285,9 @@ export async function isBrilliantMove({
       if (alternativeMovesList.length > 0) {
         const sampleSize = Math.min(alternativeMovesList.length, 3);
         let hasSafeAlternative = false;
+        let hasFasterMate = false;
+
+        const playerMateDistance = getMateDistance(evalAfter);
 
         for (let i = 0; i < sampleSize; i++) {
           const altMove = alternativeMovesList[i];
@@ -275,9 +296,30 @@ export async function isBrilliantMove({
 
           const altOutput = await getAnalysis(
             tempChess.fen(),
-            12,
+            13,
             analyzePosition,
           );
+
+          const altMateDistance = getMateDistance(altOutput.evaluation);
+
+          if (playerMateDistance !== null) {
+            const isOurMate = isWhite
+              ? typeof altOutput.evaluation === "string" &&
+                altOutput.evaluation.startsWith("M") &&
+                !altOutput.evaluation.startsWith("M-")
+              : typeof altOutput.evaluation === "string" &&
+                (altOutput.evaluation.startsWith("-M") ||
+                  altOutput.evaluation.startsWith("M-"));
+
+            if (
+              isOurMate &&
+              altMateDistance !== null &&
+              altMateDistance < playerMateDistance
+            ) {
+              hasFasterMate = true;
+              break;
+            }
+          }
 
           let altEvalNum = Number(altOutput.evaluation);
           if (typeof altOutput.evaluation === "string") {
@@ -305,7 +347,10 @@ export async function isBrilliantMove({
           }
         }
 
-        if (hasSafeAlternative) {
+        if (
+          hasFasterMate ||
+          (playerMateDistance === null && hasSafeAlternative)
+        ) {
           return false;
         }
       }

@@ -158,7 +158,7 @@ export async function isGreatMove({
       const tempChess = new Chess(fenBefore);
       tempChess.move(altMove);
 
-      const altOutput = await getAnalysis(tempChess.fen(), 17, analyzePosition);
+      const altOutput = await getAnalysis(tempChess.fen(), 15, analyzePosition);
 
       const altEP = evalToExpectedPoints(altOutput.evaluation, side);
       bestAlternativeExpectedPoints = Math.max(
