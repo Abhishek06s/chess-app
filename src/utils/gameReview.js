@@ -1,9 +1,12 @@
 import { Chess } from "chess.js";
+
 import {
   isGreatMove,
   getOpponentAttacks,
   seenGreatPositions,
 } from "./greatMoveDetector";
+import { isBrilliantMove } from "./brilliantMoveDetector";
+
 import openingBook from "../data/openings";
 
 const analysisCache = new Map();
@@ -59,9 +62,11 @@ export function classifyMove({
   wasOpponentError,
   opponentErrorGain,
   isGreatMoveCandidate,
+  isBrilliant,
   isForced,
 }) {
   if (isBookMove) return { classification: "Book", accuracyLoss: 0 };
+  if (isBrilliant) return { classification: "Brilliant", accuracyLoss: 0 };
   if (isForced) return { classification: "Forced", accuracyLoss: 0 };
 
   const beforeEP = evalToExpectedPoints(evalBefore, side);
@@ -74,7 +79,8 @@ export function classifyMove({
 
   if (wasOpponentError && loss > 0.09 && loss <= opponentErrorGain)
     return { classification: "Miss", accuracyLoss: loss };
-  if (isTopMove || loss <= 0.003) return { classification: "Best", accuracyLoss: loss };
+  if (isTopMove || loss <= 0.003)
+    return { classification: "Best", accuracyLoss: loss };
   if (loss <= 0.01) return { classification: "Excellent", accuracyLoss: loss };
   if (loss <= 0.03) return { classification: "Good", accuracyLoss: loss };
   if (loss <= 0.08) return { classification: "Inaccuracy", accuracyLoss: loss };
@@ -142,9 +148,30 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
     )
       .toLowerCase()
       .trim();
+      
     const isTopMove =
       rawEngineMove.includes(calculatedPlayerMove) ||
       calculatedPlayerMove.includes(rawEngineMove);
+
+    let myPreviousMoveCategory = undefined;
+    let opponentEvalDrop = undefined;
+
+    if (i >= 2) {
+      myPreviousMoveCategory = review[i - 2].classification;
+
+      const oppLastMove = review[i - 1];
+
+      let oppEvalBefore = Number(oppLastMove.evalBefore);
+
+      let oppEvalAfter = Number(engineBefore.evaluation);
+
+      if (!isNaN(oppEvalBefore) && !isNaN(oppEvalAfter)) {
+        opponentEvalDrop =
+          side === "white"
+            ? oppEvalAfter - oppEvalBefore
+            : oppEvalBefore - oppEvalAfter;
+      }
+    }
 
     const isGreatMoveCandidate = await isGreatMove({
       fenBefore,
@@ -162,6 +189,21 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
       getOpponentAttacks,
       seenGreatPositions,
       cleanFenForBook,
+    });
+
+    const isBrilliant = await isBrilliantMove({
+      fenBefore,
+      fenAfter,
+      move,
+      side,
+      evalBefore: engineBefore.evaluation,
+      evalAfter: engineAfter.evaluation,
+      isTopMove,
+      isGreatMoveCandidate,
+      analyzePosition,
+      getAnalysis,
+      myPreviousMoveCategory,
+      opponentEvalDrop,
     });
 
     let wasOpponentError = false;
@@ -196,6 +238,7 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
       isBookMove,
       wasOpponentError,
       opponentErrorGain,
+      isBrilliant,
       isGreatMoveCandidate,
       isForced,
     });
