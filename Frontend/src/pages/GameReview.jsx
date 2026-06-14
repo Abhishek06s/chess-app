@@ -153,15 +153,14 @@ const GameReview = () => {
 
     const startReview = async () => {
       setIsReviewing(true);
-      setProgress(0); 
-      setReviewData([]); 
+      setProgress(0);
+      setReviewData([]);
 
       try {
         const results = await generateGameReview(
           state.pgn,
           analyzePosition,
           (percentage) => {
-            
             if (isCurrent) {
               setProgress(percentage);
             }
@@ -280,6 +279,30 @@ const GameReview = () => {
           height: `${barHeight}%`,
         };
 
+  const customArrows = useMemo(() => {
+    if (!currentReview?.bestMove) return [];
+
+    const hiddenTypes = ["Best", "Great", "Brilliant", "Book", "Forced"];
+
+    if (hiddenTypes.includes(currentReview.classification)) {
+      return [];
+    }
+
+    try {
+      const game = new Chess(currentReview.fenBefore);
+
+      const move = game.move(currentReview.bestMove);
+
+      if (!move) return [];
+
+      return [[move.from, move.to, "rgba(69, 182, 254, 0.55)"]];
+    } catch (err) {
+      console.error("Failed to generate best move arrow:", err);
+      return [];
+    }
+  }, [currentReview]);
+
+
   const customSquareStyles = useMemo(() => {
     if (!currentReview || reviewData.length === 0) return {};
 
@@ -346,11 +369,7 @@ const GameReview = () => {
   const MemoizedSquare = useMemo(() => {
     return forwardRef(
       ({ children, square, squareColor, style, ...rest }, ref) => (
-        <div
-          ref={ref}
-          style={{ ...style, position: "relative" }}
-          {...rest} 
-        >
+        <div ref={ref} style={{ ...style, position: "relative" }} {...rest}>
           {children}
           {customSquareElements[square]}
         </div>
@@ -431,6 +450,7 @@ const GameReview = () => {
                 promotionDialogVariant="modal"
                 customSquareStyles={customSquareStyles}
                 customSquare={MemoizedSquare}
+                customArrows={customArrows}
               />
             </div>
 

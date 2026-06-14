@@ -4,72 +4,44 @@ import { Chess } from "chess.js";
 const useStockfish = (fen) => {
   const workerRef = useRef(null);
 
+  const fenRef = useRef(fen);
+  const sideToMoveRef = useRef("w");
+  const linesCacheRef = useRef([]);
+
+  // State managers to prevent WASM memory crashes
+  const isSearchingRef = useRef(false);
+  const pendingFenRef = useRef(null);
+
   const [evaluation, setEvaluation] = useState("0.00");
   const [bestMove, setBestMove] = useState("");
   const [depth, setDepth] = useState(0);
   const [topLines, setTopLines] = useState([]);
 
   useEffect(() => {
-    if (
-      !fen ||
-      typeof fen !== "string" ||
-      fen.trim() === "" ||
-      fen.split(" ").length < 2
-    ) {
-      setEvaluation("0.00");
-      setBestMove("-");
-      setDepth(0);
-      setTopLines([]);
-      return;
-    }
+    fenRef.current = fen;
+    const parts = fen ? fen.split(" ") : [];
+    sideToMoveRef.current = parts[1] || "w";
+  }, [fen]);
 
-    try {
-      const chessInstance = new Chess(fen);
-      if (chessInstance.isGameOver()) {
-        if (chessInstance.isCheckmate()) {
-          setEvaluation(chessInstance.turn() === "b" ? "1-0" : "0-1");
-        } else {
-          setEvaluation("1/2-1/2"); 
-        }
-        setBestMove("-");
-        setDepth(0);
-        setTopLines([]);
-
-        if (workerRef.current) {
-          workerRef.current.terminate();
-          workerRef.current = null;
-        }
-        return;
-      }
-    } catch (e) {
-      console.error("Game Over validation check failed:", e);
-    }
-
-    setBestMove("-"); 
-    setTopLines([]);
-    setDepth(0);
-
-    if (workerRef.current) {
-      workerRef.current.terminate();
-    }
-
+  // 1. Initialize Worker ONLY ONCE on mount
+  useEffect(() => {
     const worker = new Worker("/stockfish/stockfish-18-lite-single.js");
     workerRef.current = worker;
 
-    const fenParts = fen.split(" ");
-    const sideToMove = fenParts[1] || "w";
-
-    let linesCache = [];
+    worker.postMessage("uci");
+    worker.postMessage("setoption name MultiPV value 3");
+    worker.postMessage("isready");
 
     worker.onmessage = (event) => {
       const line = event.data;
       if (typeof line !== "string") return;
 
+      const currentFen = fenRef.current;
+      const sideToMove = sideToMoveRef.current;
+
       if (line.includes(" depth ")) {
         const depthMatch = line.match(/\bdepth (\d+)\b/);
-        if (depthMatch) {
-          setDepth(Number(depthMatch[1]));
-        }
+        if (depthMatch) setDepth(Number(depthMatch[1]));
       }
 
       if (line.includes("score cp") && line.includes("multipv 1 ")) {
@@ -105,7 +77,7 @@ const useStockfish = (fen) => {
           const rawMoves = pvMovesMatch[1].split(" ");
 
           try {
-            const cleanGame = new Chess(fen);
+            const cleanGame = new Chess(currentFen);
             const readableMoves = [];
             const movesToParse = Math.min(rawMoves.length, 4);
 
@@ -138,16 +110,21 @@ const useStockfish = (fen) => {
               }
             }
 
-            linesCache[idx] = {
+            linesCacheRef.current[idx] = {
               eval: lineEval,
-              continuation: readableMoves.length > 0 ? readableMoves.join(" ") : "Game Over",
+              continuation:
+                readableMoves.length > 0
+                  ? readableMoves.join(" ")
+                  : "Game Over",
             };
 
-            setTopLines([...linesCache].filter(Boolean).slice(0, 3));
+            setTopLines([...linesCacheRef.current].filter(Boolean).slice(0, 3));
           } catch (e) {}
         }
       }
 
+      // PROGRESSIVE BEST MOVE UPDATE
+      // Reads the engine's current top choice before it finishes the full depth
       if (
         line.includes(" depth ") &&
         line.includes(" pv ") &&
@@ -157,22 +134,39 @@ const useStockfish = (fen) => {
         if (pvMatch && pvMatch[1]) {
           const rawMove = pvMatch[1];
           try {
-            const cleanGame = new Chess(fen);
+            const cleanGame = new Chess(currentFen);
             const moveObj = cleanGame.move({
               from: rawMove.slice(0, 2),
               to: rawMove.slice(2, 4),
               promotion: rawMove[4] || undefined,
             });
             if (moveObj) setBestMove(moveObj.san);
-          } catch (e) {}
+          } catch (e) {
+            // Fallback to the raw UCI move if chess.js throws an error
+            setBestMove(rawMove);
+          }
         }
       }
 
+      // Handle the end of a search cleanly
       if (line.startsWith("bestmove")) {
+        isSearchingRef.current = false; // The engine has safely stopped
+
+        // If a FEN was queued up while we were stopping, start it now
+        if (pendingFenRef.current) {
+          const nextFen = pendingFenRef.current;
+          pendingFenRef.current = null; // Clear the queue
+
+          workerRef.current.postMessage(`position fen ${nextFen}`);
+          workerRef.current.postMessage("go depth 22");
+          isSearchingRef.current = true;
+        }
+
+        // Standard bestmove parsing
         const rawMove = line.split(" ")[1];
         if (rawMove && rawMove !== "(none)" && rawMove.length >= 4) {
           try {
-            const cleanGame = new Chess(fen);
+            const cleanGame = new Chess(currentFen);
             const moveObj = cleanGame.move({
               from: rawMove.slice(0, 2),
               to: rawMove.slice(2, 4),
@@ -188,18 +182,72 @@ const useStockfish = (fen) => {
       }
     };
 
-    worker.postMessage("uci");
-    worker.postMessage("setoption name MultiPV value 3");
-    worker.postMessage("isready");
-    worker.postMessage(`position fen ${fen}`);
-    worker.postMessage("go depth 22");
-  }, [fen]);
-
-  useEffect(() => {
     return () => {
-      if (workerRef.current) workerRef.current.terminate();
+      if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
     };
   }, []);
+
+  // 2. Control the Engine safely when the FEN changes
+  useEffect(() => {
+    if (
+      !fen ||
+      typeof fen !== "string" ||
+      fen.trim() === "" ||
+      fen.split(" ").length < 2
+    ) {
+      setEvaluation("0.00");
+      setBestMove("-");
+      setDepth(0);
+      setTopLines([]);
+      linesCacheRef.current = [];
+      return;
+    }
+
+    try {
+      const chessInstance = new Chess(fen);
+      if (chessInstance.isGameOver()) {
+        if (chessInstance.isCheckmate()) {
+          setEvaluation(chessInstance.turn() === "b" ? "1-0" : "0-1");
+        } else {
+          setEvaluation("1/2-1/2");
+        }
+        setBestMove("-");
+        setDepth(0);
+        setTopLines([]);
+        linesCacheRef.current = [];
+
+        if (workerRef.current && isSearchingRef.current) {
+          workerRef.current.postMessage("stop");
+        }
+        return;
+      }
+    } catch (e) {
+      console.error("Game Over validation check failed:", e);
+    }
+
+    setBestMove("-");
+    setTopLines([]);
+    setDepth(0);
+    linesCacheRef.current = [];
+
+    // Safe Command Routing
+    if (workerRef.current) {
+      if (isSearchingRef.current) {
+        // Engine is currently crunching a previous move.
+        // Queue the new FEN and ask it to stop gracefully.
+        pendingFenRef.current = fen;
+        workerRef.current.postMessage("stop");
+      } else {
+        // Engine is idle. Start immediately.
+        workerRef.current.postMessage(`position fen ${fen}`);
+        workerRef.current.postMessage("go depth 22");
+        isSearchingRef.current = true;
+      }
+    }
+  }, [fen]);
 
   return {
     evaluation,

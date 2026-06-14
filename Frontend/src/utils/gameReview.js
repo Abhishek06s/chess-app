@@ -11,10 +11,10 @@ import openingBook from "../data/openings";
 
 const analysisCache = new Map();
 
-async function getAnalysis(fen, depth, analyzePosition) {
-  const key = `${fen}-${depth}`;
+async function getAnalysis(fen, depth, analyzePosition, options = {}) {
+  const key = `${fen}-${depth}-${JSON.stringify(options)}`;
   if (analysisCache.has(key)) return analysisCache.get(key);
-  const result = await analyzePosition(fen, depth);
+  const result = await analyzePosition(fen, depth, options);
   analysisCache.set(key, result);
   return result;
 }
@@ -105,10 +105,12 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
   const replay = new Chess();
 
   const totalSteps = moves.length + 1;
+  let prevEngineBefore = null;
+  let prevEngineAfter = null;
 
   for (let i = 0; i < moves.length; i++) {
     if (typeof onProgress === "function") {
-      onProgress(Math.round((i / totalSteps) * 100));
+      onProgress(Math.round((i / totalSteps) * 95));
     }
 
     const move = moves[i];
@@ -148,7 +150,7 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
     )
       .toLowerCase()
       .trim();
-      
+
     const isTopMove =
       rawEngineMove.includes(calculatedPlayerMove) ||
       calculatedPlayerMove.includes(rawEngineMove);
@@ -189,6 +191,8 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
       getOpponentAttacks,
       seenGreatPositions,
       cleanFenForBook,
+      prevEvalBefore: prevEngineBefore ? prevEngineBefore.evaluation : null,
+      prevEvalAfter: prevEngineAfter ? prevEngineAfter.evaluation : null,
     });
 
     const isBrilliant = await isBrilliantMove({
@@ -204,6 +208,8 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
       getAnalysis,
       myPreviousMoveCategory,
       opponentEvalDrop,
+      prevEvalBefore: prevEngineBefore ? prevEngineBefore.evaluation : null,
+      prevEvalAfter: prevEngineAfter ? prevEngineAfter.evaluation : null,
     });
 
     let wasOpponentError = false;
@@ -251,6 +257,7 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
       moveNumber: Math.floor(i / 2) + 1,
       side,
       san: move.san,
+      uci: calculatedPlayerMove,
       fenBefore,
       fenAfter,
       evalBefore: engineBefore.evaluation,
@@ -263,6 +270,9 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
       accuracyLoss: moveData.accuracyLoss,
       classification: moveData.classification,
     });
+
+    prevEngineBefore = engineBefore;
+    prevEngineAfter = engineAfter;
   }
 
   const badMoves = review.filter((move) =>
@@ -271,8 +281,18 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
 
   for (let i = 0; i < badMoves.length; i++) {
     const move = badMoves[i];
-    const deeper = await getAnalysis(move.fenBefore, 18, analyzePosition);
+    const deeper = await getAnalysis(move.fenBefore, 19, analyzePosition);
     move.bestMove = deeper.bestMove;
+
+    const rawEngineMove = String(deeper.bestMoveRaw || deeper.bestMove || "")
+      .toLowerCase()
+      .trim();
+    const topEngineMove = rawEngineMove.split(/\s+/)[0];
+
+    if (move.uci === topEngineMove) {
+      move.classification = "Best";
+      move.accuracyLoss = 0;
+    }
 
     if (typeof onProgress === "function") {
       onProgress(95 + Math.round(((i + 1) / badMoves.length) * 5));

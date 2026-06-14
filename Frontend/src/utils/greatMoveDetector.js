@@ -35,6 +35,8 @@ export async function isGreatMove({
   getAnalysis,
   evalToExpectedPoints,
   cleanFenForBook,
+  prevEvalBefore,
+  prevEvalAfter
 }) {
   if (!isTopMove || isForced || isBookMove || isRecapture) {
     return false;
@@ -123,6 +125,8 @@ export async function isGreatMove({
 
   const evalBeforeNum = Number(evalBefore);
   const evalAfterNum = Number(evalAfter);
+  const prevEvalBeforeNum = prevEvalBefore ? Number(prevEvalBefore) : 0;
+  const prevEvalAfterNum = prevEvalAfter ? Number(prevEvalAfter) : 0;
 
   if (Number.isNaN(evalBeforeNum) || Number.isNaN(evalAfterNum)) {
     return false;
@@ -137,45 +141,48 @@ export async function isGreatMove({
     return false;
   }
 
+  const isCrushingBefore =
+    side === "white" ? prevEvalBeforeNum >= 5.5 : prevEvalBeforeNum <= -5.5;
+
   const topMoveExpectedPoints = evalToExpectedPoints(evalAfter, side);
-  const sandboxChess = new Chess(fenBefore);
-  const alternativeMovesList = sandboxChess
-    .moves({ verbose: true })
-    .filter(
-      (m) =>
-        `${m.from}${m.to}${m.promotion || ""}`.toLowerCase() !==
-        calculatedPlayerMove,
-    );
 
   let bestAlternativeExpectedPoints = 0;
   const altEvals = [];
 
-  if (alternativeMovesList.length > 0) {
-    const sampleSize = Math.min(alternativeMovesList.length, 4);
+  let topEngineLines = [];
+  try {
+    const multiPvOutput = await getAnalysis(fenBefore, 15, analyzePosition, {
+      multiPV: 4,
+    });
+    topEngineLines = Array.isArray(multiPvOutput)
+      ? multiPvOutput
+      : multiPvOutput.lines || [multiPvOutput];
+  } catch (e) {}
 
-    for (let i = 0; i < sampleSize; i++) {
-      const altMove = alternativeMovesList[i];
-      const tempChess = new Chess(fenBefore);
-      tempChess.move(altMove);
+  if (topEngineLines.length > 0) {
+    for (const line of topEngineLines) {
+      const engineMove = String(line.bestMoveRaw || line.move || "")
+        .toLowerCase()
+        .trim();
 
-      const altOutput = await getAnalysis(tempChess.fen(), 17, analyzePosition);
+      if (engineMove === calculatedPlayerMove || !engineMove) continue;
 
-      const altEP = evalToExpectedPoints(altOutput.evaluation, side);
+      const altEP = evalToExpectedPoints(line.evaluation, side);
       bestAlternativeExpectedPoints = Math.max(
         bestAlternativeExpectedPoints,
         altEP,
       );
 
-      let altEvalNum = Number(altOutput.evaluation);
-      if (typeof altOutput.evaluation === "string") {
+      let altEvalNum = Number(line.evaluation);
+      if (typeof line.evaluation === "string") {
         if (
-          altOutput.evaluation.startsWith("M") &&
-          !altOutput.evaluation.startsWith("M-")
+          line.evaluation.startsWith("M") &&
+          !line.evaluation.startsWith("M-")
         )
           altEvalNum = 999;
         if (
-          altOutput.evaluation.startsWith("-M") ||
-          altOutput.evaluation.startsWith("M-")
+          line.evaluation.startsWith("-M") ||
+          line.evaluation.startsWith("M-")
         )
           altEvalNum = -999;
       }
@@ -186,12 +193,12 @@ export async function isGreatMove({
     }
   }
 
-  
   let isOnlyMoveKeepingAdvantage = false;
 
   if (side === "white") {
     const sortedAlts = [...altEvals].sort((a, b) => b - a);
     const keepsEvalAboveThreshold = evalAfterNum >= 0.5;
+
     const alternativesGiveAdvantageToOpponent =
       sortedAlts.length > 0 && sortedAlts[0] <= -0.01;
 
@@ -201,6 +208,7 @@ export async function isGreatMove({
   } else {
     const sortedAlts = [...altEvals].sort((a, b) => a - b);
     const keepsEvalAboveThreshold = evalAfterNum <= -0.5;
+
     const alternativesGiveAdvantageToOpponent =
       sortedAlts.length > 0 && sortedAlts[0] >= 0.01;
 
@@ -211,23 +219,43 @@ export async function isGreatMove({
 
   const winEquityGap = topMoveExpectedPoints - bestAlternativeExpectedPoints;
 
-  if (
-    alternativeMovesList.length === 0 ||
-    winEquityGap >= 0.22 ||
-    isOnlyMoveKeepingAdvantage
-  ) {
-    const isWinningSurge =
-      side === "white"
-        ? evalAfterNum - evalBeforeNum >= 0.3
-        : evalBeforeNum - evalAfterNum >= 0.3;
+  if(winEquityGap <= 0.15 && isCrushingBefore){
+    return false;
+  }
 
-    const isTightOnlyMove = winEquityGap >= 0.25;
+  const isWinningSurge =
+    (side === "white")
+      ? prevEvalAfterNum - prevEvalBeforeNum >= 0.5 
+      : prevEvalBeforeNum - prevEvalAfterNum >= 0.5;
+
+  if (
+    topEngineLines.length <= 1 ||
+    winEquityGap >= 0.2 ||
+    isOnlyMoveKeepingAdvantage ||
+    isWinningSurge
+  ) {
+
+  const isTightOnlyMove = winEquityGap >= 0.2;
+
+  if(move.lan === "f5d3"){
+  console.log({
+    isOnlyMoveKeepingAdvantage, isTightOnlyMove, isWinningSurge
+  });}
 
     if (isWinningSurge || isTightOnlyMove || isOnlyMoveKeepingAdvantage) {
       seenGreatPositions.add(greatPositionKey);
       return true;
     }
   }
+
+  if(move.lan === "d6d5"){
+  console.log({
+    isTopMove, isForced, isBookMove, isRecapture,
+    isObviousEscape, isForcedTacticalChoice, isForcedKingEscape,
+    winEquityGap
+  });
+  }
+
 
   return false;
 }
