@@ -56,7 +56,7 @@ export async function isBrilliantMove({
       side === "white"
         ? parsedEvalBefore - parsedEvalAfter
         : parsedEvalAfter - parsedEvalBefore;
-    if (evalLoss > 1.0) return false;
+    if (evalLoss > 0.6) return false;
   }
 
   const isWhite = side === "white";
@@ -123,27 +123,17 @@ export async function isBrilliantMove({
             );
             let isUndefended = false;
             if (!attackedByLesser) {
-              const defTestChess = new Chess();
-              defTestChess.clear();
-              for (let row = 0; row < 8; row++) {
-                for (let col = 0; col < 8; col++) {
-                  const p = board[row][col];
-                  if (p) {
-                    const sq =
-                      ["a", "b", "c", "d", "e", "f", "g", "h"][col] + (8 - row);
-                    if (p.color === ourColor || p.type === "k") {
-                      defTestChess.put({ type: p.type, color: p.color }, sq);
-                    }
-                  }
-                }
-              }
+              const defTestChess = new Chess(fenAfter);
+
               defTestChess.put({ type: piece.type, color: enemyColor }, square);
+
               let defTokens = defTestChess.fen().split(" ");
               defTokens[1] = ourColor;
               defTokens[3] = "-";
 
               try {
                 defTestChess.load(defTokens.join(" "));
+
                 const ourResponses = defTestChess.moves({ verbose: true });
                 const isDefended = ourResponses.some((m) => m.to === square);
                 isUndefended = !isDefended;
@@ -232,9 +222,62 @@ export async function isBrilliantMove({
           .filter((m) => m.captured);
 
         let canWinMaterialBack = false;
+
         for (const recapture of ourRecaptures) {
           const recapturedValue = PIECE_VALUES[recapture.captured] || 0;
+
           if (recapturedValue >= maxHangingLoss) {
+            const postRecaptureChess = new Chess(sandboxChess.fen());
+            try {
+              postRecaptureChess.move(recapture);
+
+              if (
+                postRecaptureChess.isGameOver() &&
+                postRecaptureChess.inCheck()
+              ) {
+                continue;
+              }
+
+              if (analyzePosition && getAnalysis) {
+                const currentFen = postRecaptureChess.fen();
+
+                const quickAnalysis = await getAnalysis(
+                  currentFen,
+                  8,
+                  analyzePosition,
+                  { multiPV: 1 },
+                );
+                const rawLine = Array.isArray(quickAnalysis)
+                  ? quickAnalysis[0]
+                  : quickAnalysis?.lines?.[0] || quickAnalysis;
+
+                if (rawLine && rawLine.evaluation) {
+                  let postRecaptureEval = Number(rawLine.evaluation);
+                  if (typeof rawLine.evaluation === "string") {
+                    if (rawLine.evaluation.startsWith("M"))
+                      postRecaptureEval = isWhite ? 999 : -999;
+                    if (
+                      rawLine.evaluation.startsWith("-M") ||
+                      rawLine.evaluation.startsWith("M-")
+                    )
+                      postRecaptureEval = isWhite ? -999 : 999;
+                  }
+
+                  if (!isNaN(postRecaptureEval)) {
+                    const postRecaptureLoss = isWhite
+                      ? parsedEvalAfter - postRecaptureEval
+                      : postRecaptureEval - parsedEvalAfter;
+
+                    if (postRecaptureLoss > 0.7) {
+                      continue;
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              continue;
+            }
+
             canWinMaterialBack = true;
             break;
           }

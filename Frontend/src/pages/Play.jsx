@@ -64,7 +64,7 @@ const Play = () => {
   }, [game, whiteFlagged, blackFlagged]);
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white p-8">
+    <div className="min-h-screen bg-zinc-950 text-white py-8 px-20">
       <h1 className="text-3xl font-bold mb-6 text-white p-3 bg-linear-to-r from-zinc-900 to-zinc-950 rounded-md">
         Play Chess
       </h1>
