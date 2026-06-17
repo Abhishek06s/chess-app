@@ -1,8 +1,7 @@
 const jwt = require("jsonwebtoken");
-
 const User = require("../models/user.model");
 
-module.exports = async (req, res, next) => {
+const authMiddleware = async (req, res, next) => {
   try {
     const token = req.cookies.token || req.headers.authorization?.split(" ")[1];
 
@@ -30,3 +29,18 @@ module.exports = async (req, res, next) => {
     });
   }
 };
+
+const alreadyLoggedIn = (req, res, next) => {
+  const token = req.cookies?.token;
+
+  if (token) {
+    return res.status(400).json({
+      success: false,
+      message: "Already logged in",
+    });
+  }
+
+  next();
+};
+
+module.exports = {authMiddleware , alreadyLoggedIn}

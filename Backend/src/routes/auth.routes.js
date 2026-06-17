@@ -6,12 +6,12 @@ const {
   logout,
 } = require("../controllers/auth.controller");
 
-const authMiddleware = require("../middlewares/auth.middleware");
+const {authMiddleware , alreadyLoggedIn} = require("../middlewares/auth.middleware");
 
 const router = express.Router();
 
-router.post("/register", register);
-router.post("/login", login);
+router.post("/register", alreadyLoggedIn, register);
+router.post("/login", alreadyLoggedIn, login);
 router.post("/logout", logout);
 
 router.get("/me", authMiddleware, (req, res) => {

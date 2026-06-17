@@ -8,6 +8,11 @@ import Navbar from "../components/Navbar";
 import Analysis from "../pages/Analysis";
 import GameReview from "../pages/GameReview";
 
+import Login from "../pages/Login";
+import Register from "../pages/Register";
+import ProtectedRoute from "./ProtectedRoutes";
+import GuestRoute from "./GuestRoutes";
+
 export default function AppRoutes() {
   return (
     <Routes>
@@ -29,13 +34,35 @@ export default function AppRoutes() {
           </div>
         }
       />
+
       <Route
-        path="/profile"
+        path="/analysis"
         element={
           <div className="min-h-screen bg-zinc-950 text-white">
             <Navbar />
-            <Profile />
+            <Analysis />
           </div>
+        }
+      />
+      <Route
+        path="/review"
+        element={
+          <div className="min-h-screen bg-zinc-950 text-white">
+            <Navbar />
+            <GameReview />
+          </div>
+        }
+      />
+
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <div className="min-h-screen bg-zinc-950 text-white">
+              <Navbar />
+              <Profile />
+            </div>
+          </ProtectedRoute>
         }
       />
       <Route
@@ -49,22 +76,25 @@ export default function AppRoutes() {
       />
 
       <Route
-        path="/analysis"
+        path="/login"
         element={
-          <div className="min-h-screen bg-zinc-950 text-white">
-            <Navbar />
-            <Analysis />
-          </div>
+          <GuestRoute>
+            <div className="min-h-screen bg-zinc-950 text-white">
+              <Navbar />
+              <Login />
+            </div>
+          </GuestRoute>
         }
       />
-
       <Route
-        path="/review"
+        path="/register"
         element={
-          <div className="min-h-screen bg-zinc-950 text-white">
-            <Navbar />
-            <GameReview />
-          </div>
+          <GuestRoute>
+            <div className="min-h-screen bg-zinc-950 text-white">
+              <Navbar />
+              <Register />
+            </div>
+          </GuestRoute>
         }
       />
     </Routes>

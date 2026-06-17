@@ -6,6 +6,8 @@ import { Toaster } from "react-hot-toast";
 import App from "./App";
 import "./index.css";
 
+import { AuthProvider } from "./context/authContext";
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <BrowserRouter
     future={{
@@ -13,7 +15,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       v7_relativeSplatPath: true,
     }}
   >
-    <App />
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+
     <Toaster position="top-right" reverseOrder={false} />
   </BrowserRouter>,
 );
