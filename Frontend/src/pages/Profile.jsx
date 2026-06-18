@@ -14,11 +14,8 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState("rapid");
 
-  const { isAuthenticated, isAuthLoading } = useAuth();
-
   useEffect(() => {
     const fetchProfile = async () => {
-      if (isAuthLoading || !isAuthenticated) return;
       try {
         const data = await getProfile();
         setUser(data.user);

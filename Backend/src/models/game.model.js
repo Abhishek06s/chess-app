@@ -5,13 +5,13 @@ const gameSchema = new mongoose.Schema(
     whitePlayer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: function() { return this.opponentType === "human"; }
     },
 
     blackPlayer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+      required: function() { return this.opponentType === "human"; }
     },
 
     pgn: {

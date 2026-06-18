@@ -4,10 +4,10 @@ const User = require("../models/user.model");
 /**
  * Create Game
  */
-
 const createGame = async (req, res) => {
   try {
     const {
+      whitePlayer,
       blackPlayer,
       pgn,
       fen,
@@ -24,82 +24,72 @@ const createGame = async (req, res) => {
       status,
     } = req.body;
 
-    const game = await Game.create({
-      whitePlayer: req.user._id,
-
-      // temporary fallback until multiplayer is implemented
-      blackPlayer: blackPlayer || req.user._id,
-
-      pgn,
-      fen,
-      moves,
-
-      result,
-
-      opening,
-
-      timeControl,
-      gameType,
-
-      whiteTimeRemaining,
-      blackTimeRemaining,
-
-      opponentType,
-      rated,
-      termination,
-
-      status,
-    });
-
+    
     if (!timeControl || typeof timeControl.base !== "number") {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid time control",
-      });
+      return res.status(400).json({ success: false, message: "Invalid time control" });
     }
 
     const validGameTypes = ["bullet", "blitz", "rapid"];
-
     if (!validGameTypes.includes(gameType)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid game type",
-      });
+      return res.status(400).json({ success: false, message: "Invalid game type" });
     }
 
-    const whiteUser = await User.findById(game.whitePlayer);
-    const blackUser = await User.findById(game.blackPlayer);
+    
+    const finalWhitePlayer = whitePlayer || req.user._id;
+    const finalBlackPlayer = blackPlayer || req.user._id;
+
+    const game = await Game.create({
+      whitePlayer: finalWhitePlayer,
+      blackPlayer: finalBlackPlayer,
+      pgn,
+      fen,
+      moves,
+      result,
+      opening,
+      timeControl,
+      gameType,
+      whiteTimeRemaining,
+      blackTimeRemaining,
+      opponentType,
+      rated,
+      termination,
+      status,
+    });
+
+    const whiteUser = await User.findById(finalWhitePlayer);
+    const blackUser = await User.findById(finalBlackPlayer);
 
     if (!whiteUser || !blackUser) {
       return res.status(404).json({
         success: false,
-        message: "Player not found",
+        message: "Player account profile not found",
       });
     }
 
-    const whiteStats = whiteUser.stats[gameType];
-    const blackStats = blackUser.stats[gameType];
-
     /**
-     * Bot games
+     * SELF-PLAY HANDLING (White ID matches Black ID)
      */
-
     if (whiteUser._id.toString() === blackUser._id.toString()) {
-      whiteStats.gamesPlayed += 1;
+      const userStats = whiteUser.stats[gameType];
+      userStats.gamesPlayed += 1;
 
       if (result === "1-0") {
-        whiteStats.wins += 1;
+        userStats.wins += 1;
       } else if (result === "0-1") {
-        whiteStats.losses += 1;
+        userStats.losses += 1;
       } else {
-        whiteStats.draws += 1;
+        userStats.draws += 1;
       }
 
       await whiteUser.save();
+
     } else {
       /**
-       * Human vs Human
+       * MULTIPLAYER HANDLING (Different Player IDs)
        */
+      const whiteStats = whiteUser.stats[gameType];
+      const blackStats = blackUser.stats[gameType];
+
       whiteStats.gamesPlayed += 1;
       blackStats.gamesPlayed += 1;
 
