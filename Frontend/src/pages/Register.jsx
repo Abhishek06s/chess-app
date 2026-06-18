@@ -3,8 +3,10 @@ import { useNavigate, Link } from "react-router-dom";
 import { toast } from "react-hot-toast";
 
 import { registerUser } from "../services/auth.service";
+import { useAuth } from "../context/authContext";
 
 const Register = () => {
+  const { login } = useAuth();
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
@@ -28,15 +30,15 @@ const Register = () => {
     try {
       setLoading(true);
 
-      await registerUser(formData);
+      const res = await registerUser(formData);
+
+      login(res.user);
 
       toast.success("Account created");
 
-      navigate("/login");
+      navigate("/");
     } catch (error) {
-      toast.error(
-        error?.response?.data?.message || "Registration failed"
-      );
+      toast.error(error?.response?.data?.message || "Registration failed");
     } finally {
       setLoading(false);
     }
@@ -91,10 +93,7 @@ const Register = () => {
 
         <p className="text-zinc-400 text-center mt-6">
           Already have an account?{" "}
-          <Link
-            to="/login"
-            className="text-blue-400 hover:text-blue-300"
-          >
+          <Link to="/login" className="text-blue-400 hover:text-blue-300">
             Login
           </Link>
         </p>

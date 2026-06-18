@@ -1,5 +1,32 @@
 const mongoose = require("mongoose");
 
+const statsSchema = {
+  rating: {
+    type: Number,
+    default: 1200,
+  },
+
+  gamesPlayed: {
+    type: Number,
+    default: 0,
+  },
+
+  wins: {
+    type: Number,
+    default: 0,
+  },
+
+  losses: {
+    type: Number,
+    default: 0,
+  },
+
+  draws: {
+    type: Number,
+    default: 0,
+  },
+};
+
 const userSchema = new mongoose.Schema(
   {
     username: {
@@ -21,34 +48,15 @@ const userSchema = new mongoose.Schema(
       required: true,
     },
 
-    rating: {
-      type: Number,
-      default: 1200,
-    },
-
-    gamesPlayed: {
-      type: Number,
-      default: 0,
-    },
-
-    wins: {
-      type: Number,
-      default: 0,
-    },
-
-    losses: {
-      type: Number,
-      default: 0,
-    },
-
-    draws: {
-      type: Number,
-      default: 0,
+    stats: {
+      bullet: statsSchema,
+      blitz: statsSchema,
+      rapid: statsSchema,
     },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 module.exports = mongoose.model("User", userSchema);

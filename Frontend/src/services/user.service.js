@@ -6,8 +6,8 @@ export const getProfile = async () => {
   return response.data;
 };
 
-export const getLeaderboard = async () => {
-  const response = await api.get("/users/leaderboard");
+export const getLeaderboard = async (mode) => {
+  const response = await api.get(`/users/leaderboard?mode=${mode}`);
 
   return response.data;
 };

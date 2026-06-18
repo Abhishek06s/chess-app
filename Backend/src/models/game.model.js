@@ -49,8 +49,21 @@ const gameSchema = new mongoose.Schema(
     },
 
     timeControl: {
-      type: Number,
-      default: 600,
+      base: {
+        type: Number,
+        required: true,
+      },
+
+      increment: {
+        type: Number,
+        default: 0,
+      },
+    },
+
+    gameType: {
+      type: String,
+      enum: ["bullet", "blitz", "rapid"],
+      required: true,
     },
 
     whiteTimeRemaining: {
@@ -63,10 +76,30 @@ const gameSchema = new mongoose.Schema(
       default: 0,
     },
 
-    gameMode: {
+    opponentType: {
       type: String,
-      enum: ["bot", "casual", "ranked"],
-      default: "bot",
+      enum: ["bot", "human"],
+      required: true,
+    },
+
+    rated: {
+      type: Boolean,
+      default: false,
+    },
+
+    termination: {
+      type: String,
+      enum: [
+        "checkmate",
+        "timeout",
+        "resignation",
+        "draw",
+        "stalemate",
+        "insufficient-material",
+        "threefold-repetition",
+        "abort",
+      ],
+      required: true,
     },
 
     status: {

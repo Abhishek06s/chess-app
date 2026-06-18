@@ -5,11 +5,12 @@ import { Trophy, Medal } from "lucide-react";
 const Leaderboard = () => {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [mode, setMode] = useState("rapid");
 
   useEffect(() => {
     const fetchLeaderboard = async () => {
       try {
-        const data = await getLeaderboard();
+        const data = await getLeaderboard(mode);
         setPlayers(data.users);
       } catch (error) {
         console.error(error);
@@ -19,31 +20,35 @@ const Leaderboard = () => {
     };
 
     fetchLeaderboard();
-  }, []);
+  }, [mode]);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center space-y-4">
         <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-zinc-400 font-medium animate-pulse">Loading Leaderboard...</p>
+        <p className="text-zinc-400 font-medium animate-pulse">
+          Loading Leaderboard...
+        </p>
       </div>
     );
   }
 
-  // Helper to colorize top 3 ranks
   const getRankStyle = (index) => {
     switch (index) {
-      case 0: return "text-yellow-400 bg-yellow-400/10 border-yellow-400/20";
-      case 1: return "text-zinc-300 bg-zinc-300/10 border-zinc-300/20";
-      case 2: return "text-amber-600 bg-amber-600/10 border-amber-600/20";
-      default: return "text-zinc-500 border-transparent";
+      case 0:
+        return "text-yellow-400 bg-yellow-400/10 border-yellow-400/20";
+      case 1:
+        return "text-zinc-300 bg-zinc-300/10 border-zinc-300/20";
+      case 2:
+        return "text-amber-600 bg-amber-600/10 border-amber-600/20";
+      default:
+        return "text-zinc-500 border-transparent";
     }
   };
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white py-12 px-4">
       <div className="max-w-5xl mx-auto">
-        
         {/* Header */}
         <div className="text-center mb-10">
           <div className="inline-flex items-center justify-center p-3 bg-emerald-500/10 rounded-2xl mb-4 border border-emerald-500/20">
@@ -52,7 +57,29 @@ const Leaderboard = () => {
           <h1 className="text-4xl md:text-5xl font-extrabold bg-clip-text text-transparent bg-linear-to-r from-emerald-400 to-cyan-400">
             Global Leaderboard
           </h1>
-          <p className="text-zinc-400 mt-3 font-medium">Top players ranked by total rating</p>
+          <p className="text-zinc-400 mt-3 font-medium">
+            Top players ranked by{" "}
+            <span className="text-red-500 font-semibold font-sans">
+              {mode.toUpperCase()}
+            </span>{" "}
+            rating
+          </p>
+        </div>
+
+        <div className="flex justify-center gap-3 mb-8">
+          {["bullet", "blitz", "rapid"].map((gameMode) => (
+            <button
+              key={gameMode}
+              onClick={() => setMode(gameMode)}
+              className={`px-4 py-2 rounded-xl capitalize transition cursor-pointer ${
+                mode === gameMode
+                  ? "bg-emerald-600 text-white"
+                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+              }`}
+            >
+              {gameMode}
+            </button>
+          ))}
         </div>
 
         {/* Table Container */}
@@ -79,7 +106,9 @@ const Leaderboard = () => {
                   >
                     {/* Rank Badge */}
                     <td className="p-5 text-center">
-                      <div className={`inline-flex items-center justify-center w-8 h-8 rounded-full border text-sm font-bold ${getRankStyle(index)}`}>
+                      <div
+                        className={`inline-flex items-center justify-center w-8 h-8 rounded-full border text-sm font-bold ${getRankStyle(index)}`}
+                      >
                         {index < 3 ? <Medal className="w-4 h-4" /> : index + 1}
                       </div>
                     </td>
@@ -91,27 +120,27 @@ const Leaderboard = () => {
 
                     {/* Rating */}
                     <td className="p-5 text-right font-bold text-emerald-400">
-                      {player.rating}
+                      {player.stats[mode].rating}
                     </td>
 
                     {/* Games */}
                     <td className="p-5 text-right text-zinc-400">
-                      {player.gamesPlayed}
+                      {player.stats[mode].gamesPlayed}
                     </td>
 
                     {/* Wins */}
                     <td className="p-5 text-right text-emerald-500/80 font-medium">
-                      {player.wins}
+                      {player.stats[mode].wins}
                     </td>
 
                     {/* Losses */}
                     <td className="p-5 text-right text-red-500/80 font-medium">
-                      {player.losses}
+                      {player.stats[mode].losses}
                     </td>
 
                     {/* Draws */}
                     <td className="p-5 text-right text-yellow-500/80 font-medium">
-                      {player.draws}
+                      {player.stats[mode].draws}
                     </td>
                   </tr>
                 ))}
@@ -119,7 +148,6 @@ const Leaderboard = () => {
             </table>
           </div>
         </div>
-
       </div>
     </div>
   );

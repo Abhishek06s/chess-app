@@ -1,8 +1,40 @@
 import { Chess } from "chess.js";
 import { useEffect, useRef, useState } from "react";
-import { ZoomIn } from "react-feather";
+import {
+  ZoomIn,
+  Flag,
+  HelpCircle,
+  AlertTriangle,
+  Zap,
+  Clock,
+  Sliders,
+} from "react-feather";
 import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
+
+import useChessSounds from "../hooks/useChessSounds";
+import { TIME_PRESETS } from "../utils/timeControls";
+
+export const BulletIcon = ({ className = "w-4 h-4", ...props }) => {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      {...props}
+    >
+      <g transform="rotate(-45 12 12)">
+        <path d="M12 2C9 5.5 8 8 8 11v8a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-8c0-3-1-5.5-4-9z" />
+        <line x1="8" y1="14" x2="16" y2="14" />
+        <line x1="8" y1="18" x2="16" y2="18" />
+      </g>
+    </svg>
+  );
+};
 
 const GameSidebar = ({
   moves,
@@ -12,54 +44,62 @@ const GameSidebar = ({
   flipBoard,
   resetClock,
   setGameStarted,
+  gameStarted,
+  isGameOver,
   whiteFlagged,
   blackFlagged,
   resetCapturedPieces,
+  isLoggedIn,
+  onAuthRequired,
+  timeControl,
+  setTimeControl,
+  onGameAction,
+  setEndgame,
 }) => {
   const navigate = useNavigate();
+  const [showShareMenu, setShowShareMenu] = useState(false);
+  const movesContainerRef = useRef(null);
+
+  const [activeCategory, setActiveCategory] = useState("rapid");
+  const [customMinutes, setCustomMinutes] = useState("10");
+  const [customIncrement, setCustomIncrement] = useState("5");
+
+  const gameStartSound = useChessSounds().playGameStartSound;
+
+  const getChessComCategory = (baseInSecs, incInSecs) => {
+    const totalMins = baseInSecs / 60 + (40 * incInSecs) / 60;
+    if (totalMins < 3) return "Bullet";
+    if (totalMins < 10) return "Blitz";
+    return "Rapid";
+  };
+
+  const currentFormatLabel = `${Math.floor(timeControl.base / 60)}+${timeControl.increment}`;
+  const currentCategoryPool = getChessComCategory(
+    timeControl.base,
+    timeControl.increment,
+  );
+
+  const previewMins = Math.max(1, parseInt(customMinutes, 10) || 1);
+  const previewInc = Math.max(0, parseInt(customIncrement, 10) || 0);
+  const previewCategoryPool = getChessComCategory(previewMins * 60, previewInc);
 
   const openAnalysis = () => {
     const tempGame = new Chess();
-
-    moves.forEach((move) => {
-      tempGame.move(move);
-    });
-
+    moves.forEach((move) => tempGame.move(move));
     navigate("/analysis", {
-      state: {
-        moves,
-        pgn: tempGame.pgn(),
-        fen: tempGame.fen(),
-      },
+      state: { moves, pgn: tempGame.pgn(), fen: tempGame.fen() },
     });
   };
 
-  const [showShareMenu, setShowShareMenu] = useState(false);
-  const copyPGN = async () => {
+  const handleCopy = async (type) => {
     const tempGame = new Chess();
-
-    moves.forEach((move) => {
-      tempGame.move(move);
-    });
-
-    await navigator.clipboard.writeText(tempGame.pgn());
-    toast.success("PGN copied to clipboard!");
+    moves.forEach((move) => tempGame.move(move));
+    const value = type === "pgn" ? tempGame.pgn() : tempGame.fen();
+    await navigator.clipboard.writeText(value);
+    toast.success(`${type.toUpperCase()} copied!`);
     setShowShareMenu(false);
   };
 
-  const copyFEN = async () => {
-    const tempGame = new Chess();
-
-    moves.forEach((move) => {
-      tempGame.move(move);
-    });
-
-    await navigator.clipboard.writeText(tempGame.fen());
-    toast.success("FEN copied to clipboard!");
-    setShowShareMenu(false);
-  };
-
-  const movesContainerRef = useRef(null);
   useEffect(() => {
     if (movesContainerRef.current) {
       movesContainerRef.current.scrollTop =
@@ -67,158 +107,338 @@ const GameSidebar = ({
     }
   }, [moves]);
 
-  let statusText = "Game in Progress";
-  let statusClass = "text-green-400 mt-3 text-md";
+  let statusText = "";
+  let statusClass = "";
 
-  if (whiteFlagged) {
-    statusText = "Black wins on time!";
-    statusClass = "text-red-400 mt-3 text-md";
-  } else if (blackFlagged) {
-    statusText = "White wins on time!";
-    statusClass = "text-red-400 mt-3 text-md";
-  }
+  if (gameStarted) {
+    statusText = "Game Active";
+    statusClass = "text-emerald-400 bg-emerald-500/10 border-white/10";
 
-  if (game.isCheckmate()) {
-    statusText = "Checkmate!";
-    statusClass = "text-red-400 mt-3 text-md";
-  } else if (game.isCheck()) {
-    statusText = "Check!";
-    statusClass = "text-yellow-400 mt-3 text-md";
-  } else if (game.isDraw()) {
-    if (game.isStalemate()) {
-      statusText = "Stalemate!";
-      statusClass = "text-blue-400 mt-3 text-md";
-    } else if (game.isInsufficientMaterial()) {
-      statusText = "Draw by Insufficient Material!";
-      statusClass = "text-blue-400 mt-3 text-md";
-    } else if (game.isDraw()) {
-      statusText = "Draw!";
-      statusClass = "text-blue-400 mt-3 text-md";
+    if (whiteFlagged || blackFlagged || game.isGameOver()) {
+      statusText = "Match Finished";
+      statusClass = "text-rose-400 bg-rose-500/10 border-white/10 font-medium";
+    } else if (game.isCheck()) {
+      statusText = "Check!";
+      statusClass =
+        "text-amber-400 bg-amber-500/10 border-white/10 animate-pulse";
     }
   }
 
-  function resetGame() {
+  const handleNewGame = () => {
+    if (!isLoggedIn) {
+      onAuthRequired();
+      return;
+    }
     setGame(new Chess());
     setMoves([]);
     resetClock();
     resetCapturedPieces();
     setGameStarted(true);
-  }
+    setEndgame({ type: null, winner: null });
+    gameStartSound();
+  };
+
+  const applyCustomTime = () => {
+    setTimeControl({ base: previewMins * 60, increment: previewInc });
+    toast.success(
+      `Custom setup applied: ${previewMins} min | ${previewInc}s (${previewCategoryPool})`,
+    );
+  };
+
+  const showAnalysisButton =
+    isLoggedIn && (isGameOver || !gameStarted) && moves.length > 0;
+  const showFlipBoardButton = !gameStarted || isGameOver;
+  const isMatchRunning = gameStarted && !isGameOver;
 
   const movePairs = [];
-
   for (let i = 0; i < moves.length; i += 2) {
-    movePairs.push({
-      white: moves[i],
-      black: moves[i + 1] || "",
-    });
+    movePairs.push({ white: moves[i], black: moves[i + 1] || "" });
   }
 
   return (
-    <div className="bg-zinc-900 rounded-2xl p-6 h-fit">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold mb-4">Game Information</h2>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={openAnalysis}
-            className="bg-zinc-700 hover:bg-zinc-600 p-3 rounded-lg transition"
-          >
-            <ZoomIn size={24} className="cursor-pointer" />
-          </button>
-          <div className="relative">
-            <button
-              onClick={() => setShowShareMenu(!showShareMenu)}
-              className="w-full py-3 px-4 rounded-xl cursor-pointer bg-purple-600 hover:bg-purple-500 transition"
-            >
-              📤 Share Game
-            </button>
+    <div className="flex flex-col h-full justify-between">
+      {/* Top Section */}
+      <div>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-semibold tracking-wide text-zinc-400">
+            Match Setup
+          </h2>
+          <div className="flex items-center gap-2">
+            {showAnalysisButton && (
+              <button
+                onClick={openAnalysis}
+                className="bg-zinc-800 hover:bg-zinc-750 border border-white/10 p-2.5 rounded-xl transition shadow cursor-pointer"
+                title="Analysis Deck"
+              >
+                <ZoomIn size={18} className="text-zinc-200" />
+              </button>
+            )}
 
-            {showShareMenu && (
-              <div className="absolute mt-2 w-full bg-zinc-800 rounded-xl shadow-lg overflow-hidden z-10">
+            {moves.length > 0 && (
+              <div className="relative">
                 <button
-                  onClick={copyPGN}
-                  className="w-full text-left px-4 py-3 hover:bg-zinc-700 cursor-pointer"
+                  onClick={() => setShowShareMenu(!showShareMenu)}
+                  className="py-2.5 px-4 text-xs font-semibold rounded-xl bg-purple-600 hover:bg-purple-500 transition shadow flex items-center gap-1 cursor-pointer"
                 >
-                  📋 Copy PGN
+                  Share
                 </button>
-
-                <button
-                  onClick={copyFEN}
-                  className="w-full text-left px-4 py-3 hover:bg-zinc-700 cursor-pointer"
-                >
-                  📋 Copy FEN
-                </button>
+                {showShareMenu && (
+                  <div className="absolute right-0 mt-2 w-36 bg-zinc-800 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-20">
+                    <button
+                      onClick={() => handleCopy("pgn")}
+                      className="w-full text-left text-xs px-4 py-2.5 hover:bg-zinc-700 transition text-zinc-200 cursor-pointer"
+                    >
+                      Copy PGN
+                    </button>
+                    <button
+                      onClick={() => handleCopy("fen")}
+                      className="w-full text-left text-xs px-4 py-2.5 hover:bg-zinc-700 transition text-zinc-200 cursor-pointer"
+                    >
+                      Copy FEN
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
+
+        {/* Configuration Setup Module: Visible only when match is idle */}
+        {!isMatchRunning && (
+          <div className="space-y-4 mb-5">
+            <div className="flex items-center gap-3 w-full">
+              <button
+                onClick={handleNewGame}
+                className="flex-1 py-3.5 px-5 text-base font-bold bg-emerald-600 hover:bg-emerald-500 transition rounded-xl shadow-md cursor-pointer"
+              >
+                New Game
+              </button>
+
+              {/* Dynamic Status Pill detailing standard Chess.com classification split */}
+              <div className="bg-zinc-800 border border-white/10 px-3 py-2 rounded-xl font-mono text-center shadow-md select-none flex flex-col justify-center min-w-28">
+                <span className="text-sm font-bold text-purple-400">
+                  ⏱️ {currentFormatLabel}
+                </span>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 mt-0.5">
+                  {currentCategoryPool}
+                </span>
+              </div>
+            </div>
+
+            {/* Time Category Selector Tabs */}
+            <div className="grid grid-cols-4 gap-1 bg-zinc-950 p-1 rounded-xl border border-white/5">
+              {["bullet", "blitz", "rapid", "custom"].map((cat) => {
+                const isActive = activeCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setActiveCategory(cat)}
+                    className={`py-2 text-xs font-semibold rounded-lg capitalize transition cursor-pointer flex items-center justify-center gap-1 ${
+                      isActive
+                        ? "bg-purple-600 text-white shadow"
+                        : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900"
+                    }`}
+                  >
+                    {cat === "bullet" && <BulletIcon size={13} />}
+                    {cat === "blitz" && <Zap size={13} />}
+                    {cat === "rapid" && <Clock size={13} />}
+                    {cat === "custom" && <Sliders size={13} />}
+                    <span className="hidden sm:inline">{cat}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Sub-Panel: Standard Presets vs Custom Inputs Selector */}
+            {activeCategory !== "custom" ? (
+              <div className="grid grid-cols-2 gap-2 max-h-28 overflow-y-auto pr-1 custom-scrollbar">
+                {TIME_PRESETS[activeCategory]?.map((preset) => {
+                  const isSelected =
+                    timeControl.base === preset.base &&
+                    timeControl.increment === preset.increment;
+                  return (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() =>
+                        setTimeControl({
+                          base: preset.base,
+                          increment: preset.increment,
+                        })
+                      }
+                      className={`py-2 px-3 text-xs font-medium rounded-xl border transition cursor-pointer text-center truncate ${
+                        isSelected
+                          ? "bg-purple-600/10 border-purple-500 text-purple-400 font-bold"
+                          : "bg-zinc-800/40 border-white/5 hover:bg-zinc-800 text-zinc-300"
+                      }`}
+                    >
+                      {preset.label.split(" ")[0]}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-3 bg-zinc-950/40 border border-white/5 rounded-xl space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-1">
+                      Base (Mins)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="180"
+                      value={customMinutes}
+                      onChange={(e) => setCustomMinutes(e.target.value)}
+                      className="w-full bg-zinc-900 border border-white/10 rounded-lg p-2 text-xs text-center text-white focus:outline-none focus:border-purple-500 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-1">
+                      Increment (Secs)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="60"
+                      value={customIncrement}
+                      onChange={(e) => setCustomIncrement(e.target.value)}
+                      className="w-full bg-zinc-900 border border-white/10 rounded-lg p-2 text-xs text-center text-white focus:outline-none focus:border-purple-500 font-mono"
+                    />
+                  </div>
+                </div>
+
+                {/* Interactive Dynamic Category Indicator message inside the action button */}
+                <button
+                  type="button"
+                  onClick={applyCustomTime}
+                  className="w-full py-2 bg-zinc-800 hover:bg-purple-600 hover:text-white transition rounded-lg text-xs font-bold text-zinc-300 border border-white/5 cursor-pointer shadow-sm flex items-center justify-center gap-1.5"
+                >
+                  <span>Apply Parameters</span>
+                  <span className="text-[10px] bg-black/30 text-purple-400 font-semibold px-1.5 py-0.5 rounded uppercase border border-white/5 group-hover:text-white">
+                    {previewCategoryPool}
+                  </span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Dashboard Frame Status Bar */}
+        {(showFlipBoardButton || statusText) && (
+          <div className="bg-zinc-950/40 border border-white/10 rounded-xl p-4 mb-4 flex items-center justify-between gap-4 shadow-inner">
+            {showFlipBoardButton ? (
+              <button
+                onClick={flipBoard}
+                className="bg-blue-600 hover:bg-blue-500 text-xs font-semibold px-4 py-2.5 rounded-lg transition border border-white/5 shadow-md cursor-pointer"
+              >
+                Flip Board
+              </button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <div
+                  className={`w-2.5 h-2.5 rounded-full ${game.turn() === "w" ? "bg-white" : "bg-black border border-zinc-600"}`}
+                />
+                <span className="text-xs font-semibold text-zinc-400">
+                  {game.turn() === "w" ? "White's turn" : "Black's turn"}
+                </span>
+              </div>
+            )}
+
+            {statusText && (
+              <div
+                className={`text-xs font-bold px-2.5 py-1.5 rounded-md border ${statusClass}`}
+              >
+                {statusText}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      <div>
-        <button
-          onClick={resetGame}
-          className="w-full mb-6 py-3 rounded-xl cursor-pointer bg-green-600 hover:bg-green-500 transition"
+      {/* Center Stack: Move Log List History */}
+      <div className="flex-1 flex flex-col min-h-40 mb-4">
+        <h3 className="font-semibold text-zinc-500 text-xs uppercase tracking-wider mb-2 pl-1">
+          Moves Played
+        </h3>
+        <div
+          ref={movesContainerRef}
+          className="bg-zinc-950/60 border border-white/10 rounded-xl p-2 max-h-56 overflow-y-auto space-y-0.5 flex-1 shadow-inner custom-scrollbar"
         >
-          New Game
-        </button>
-
-        <div className="bg-zinc-800 rounded-xl p-4 mb-6 flex justify-between">
-          <button
-            onClick={() => {
-              flipBoard();
-            }}
-            className="w-25 bg-blue-600 hover:bg-blue-500 py-3 rounded-xl mb-2 cursor-pointer"
-          >
-            Flip Board
-          </button>
-
-          <div>
-            <h3 className="text-sm text-zinc-300 mb-2">Current Turn</h3>
-
-            <div className="flex items-center gap-3">
-              <div
-                className={`w-4 h-4 rounded-full ${
-                  game.turn() === "w"
-                    ? "bg-white"
-                    : "bg-black border border-zinc-400"
-                }`}
-              />
-
-              <span className="font-semibold ">
-                {game.turn() === "w" ? "White to Move" : "Black to Move"}
-              </span>
+          {moves.length === 0 ? (
+            <div className="h-full flex items-center justify-center p-4">
+              <p className="text-zinc-600 text-xs italic">
+                No notation items logged yet
+              </p>
             </div>
-          </div>
-
-          <div className={`${statusClass}`}>{statusText}</div>
+          ) : (
+            movePairs.map((pair, index) => (
+              <div
+                key={index}
+                className="px-3 py-2 rounded-md flex justify-between items-center font-mono text-xs border-b border-zinc-900/40 last:border-0 hover:bg-zinc-800/30 transition"
+              >
+                <span className="text-zinc-600 font-bold w-8">
+                  {index + 1}.
+                </span>
+                <span className="flex-1 text-left text-zinc-200 font-semibold">
+                  {pair.white}
+                </span>
+                <span className="flex-1 text-left text-zinc-400">
+                  {pair.black}
+                </span>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
-      <h3 className="font-semibold mb-4">Move History</h3>
+      {/* Bottom Section Action Bar: Appears exclusively when game is running */}
+      {isMatchRunning && (
+        <div className="bg-zinc-950/40 border border-white/10 rounded-xl p-3 space-y-3 shadow-md">
+          <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold text-zinc-500 tracking-wide uppercase border-b border-white/5">
+            <span>Live Pool Tier</span>
+            <span className="text-purple-400 font-mono tracking-normal bg-zinc-800/80 px-2 py-0.5 rounded border border-white/5 text-[11px] uppercase font-bold">
+              {currentCategoryPool} ({currentFormatLabel})
+            </span>
+          </div>
 
-      <div
-        ref={movesContainerRef}
-        className="max-h-125 overflow-y-auto space-y-2"
-      >
-        {moves.length === 0 ? (
-          <p className="text-zinc-400">No moves yet</p>
-        ) : (
-          movePairs.map((pair, index) => (
-            <div
-              key={index}
-              className="bg-zinc-800 px-3 py-2 rounded-lg flex justify-between font-mono w-full"
+          <div className="grid grid-cols-3 gap-2">
+            {moves.length < 2 ? (
+              <button
+                onClick={() => onGameAction("abort")}
+                className="flex flex-col items-center gap-1 py-3 px-2 bg-zinc-800 hover:bg-zinc-750 transition border border-white/10 rounded-xl text-xs font-semibold text-zinc-300 shadow-sm cursor-pointer"
+                title="Abort Match"
+              >
+                <AlertTriangle size={16} className="text-amber-400" />
+                <span>Abort</span>
+              </button>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-3 px-2 bg-zinc-900/40 border border-white/5 rounded-xl text-xs text-zinc-600 font-medium select-none">
+                <span>No Abort</span>
+              </div>
+            )}
+
+            <button
+              onClick={() => onGameAction("draw")}
+              className="flex flex-col items-center gap-1 py-3 px-2 bg-zinc-800 hover:bg-zinc-750 transition border border-white/10 rounded-xl text-xs font-semibold text-zinc-300 shadow-sm cursor-pointer"
+              title="Offer Draw"
             >
-              <span className="text-zinc-500 w-8">{index + 1}.</span>
-              <span className="flex-1 text-left text-zinc-200">
-                {pair.white}
-              </span>
-              <span className="flex-1 text-left text-zinc-300">
-                {pair.black}
-              </span>
-            </div>
-          ))
-        )}
-      </div>
+              <HelpCircle size={16} className="text-sky-400" />
+              <span>Offer Draw</span>
+            </button>
+
+            <button
+              onClick={() => onGameAction("resign")}
+              className="flex flex-col items-center gap-1 py-3 px-2 bg-rose-950/40 hover:bg-rose-900/40 transition border border-rose-500/20 rounded-xl text-xs font-semibold text-rose-400 shadow-sm cursor-pointer"
+              title="Resign Match"
+            >
+              <Flag size={16} className="text-rose-500" />
+              <span>Resign</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

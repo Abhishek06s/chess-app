@@ -2,7 +2,7 @@ const Game = require("../models/game.model");
 const User = require("../models/user.model");
 
 /**
- * -Create_Game
+ * Create Game
  */
 
 const createGame = async (req, res) => {
@@ -15,56 +15,103 @@ const createGame = async (req, res) => {
       result,
       opening,
       timeControl,
+      gameType,
       whiteTimeRemaining,
       blackTimeRemaining,
-      gameMode,
+      opponentType,
+      rated,
+      termination,
+      status,
     } = req.body;
 
     const game = await Game.create({
       whitePlayer: req.user._id,
 
-      // temporary fallback until multiplayer is built
+      // temporary fallback until multiplayer is implemented
       blackPlayer: blackPlayer || req.user._id,
 
       pgn,
       fen,
       moves,
+
       result,
+
       opening,
+
       timeControl,
+      gameType,
+
       whiteTimeRemaining,
       blackTimeRemaining,
-      gameMode,
+
+      opponentType,
+      rated,
+      termination,
+
+      status,
     });
+
+    if (!timeControl || typeof timeControl.base !== "number") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid time control",
+      });
+    }
+
+    const validGameTypes = ["bullet", "blitz", "rapid"];
+
+    if (!validGameTypes.includes(gameType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid game type",
+      });
+    }
 
     const whiteUser = await User.findById(game.whitePlayer);
     const blackUser = await User.findById(game.blackPlayer);
 
+    if (!whiteUser || !blackUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Player not found",
+      });
+    }
+
+    const whiteStats = whiteUser.stats[gameType];
+    const blackStats = blackUser.stats[gameType];
+
+    /**
+     * Bot games
+     */
+
     if (whiteUser._id.toString() === blackUser._id.toString()) {
-      whiteUser.gamesPlayed += 1;
+      whiteStats.gamesPlayed += 1;
 
       if (result === "1-0") {
-        whiteUser.wins += 1;
+        whiteStats.wins += 1;
       } else if (result === "0-1") {
-        whiteUser.losses += 1;
+        whiteStats.losses += 1;
       } else {
-        whiteUser.draws += 1;
+        whiteStats.draws += 1;
       }
 
       await whiteUser.save();
     } else {
-      whiteUser.gamesPlayed += 1;
-      blackUser.gamesPlayed += 1;
+      /**
+       * Human vs Human
+       */
+      whiteStats.gamesPlayed += 1;
+      blackStats.gamesPlayed += 1;
 
       if (result === "1-0") {
-        whiteUser.wins += 1;
-        blackUser.losses += 1;
+        whiteStats.wins += 1;
+        blackStats.losses += 1;
       } else if (result === "0-1") {
-        blackUser.wins += 1;
-        whiteUser.losses += 1;
+        blackStats.wins += 1;
+        whiteStats.losses += 1;
       } else {
-        whiteUser.draws += 1;
-        blackUser.draws += 1;
+        whiteStats.draws += 1;
+        blackStats.draws += 1;
       }
 
       await whiteUser.save();
@@ -84,7 +131,7 @@ const createGame = async (req, res) => {
 };
 
 /**
- *- Get_My_Games
+ * Get My Games
  */
 
 const getMyGames = async (req, res) => {
@@ -92,8 +139,8 @@ const getMyGames = async (req, res) => {
     const games = await Game.find({
       $or: [{ whitePlayer: req.user._id }, { blackPlayer: req.user._id }],
     })
-      .populate("whitePlayer", "username rating")
-      .populate("blackPlayer", "username rating")
+      .populate("whitePlayer", "username stats")
+      .populate("blackPlayer", "username stats")
       .sort({ createdAt: -1 });
 
     res.status(200).json({
@@ -110,14 +157,14 @@ const getMyGames = async (req, res) => {
 };
 
 /**
- *- Get_ParticularGame
+ * Get Particular Game
  */
 
 const getGameById = async (req, res) => {
   try {
     const game = await Game.findById(req.params.id)
-      .populate("whitePlayer", "username rating")
-      .populate("blackPlayer", "username rating");
+      .populate("whitePlayer", "username stats")
+      .populate("blackPlayer", "username stats");
 
     if (!game) {
       return res.status(404).json({
@@ -139,7 +186,7 @@ const getGameById = async (req, res) => {
 };
 
 /**
- *- Delete_ParticularGame
+ * Delete Particular Game
  */
 
 const deleteGame = async (req, res) => {

@@ -4,6 +4,7 @@ import checkSoundFile from "../assets/sounds/check.mp3";
 import castleSoundFile from "../assets/sounds/castle.mp3";
 import promoteSoundFile from "../assets/sounds/promote.mp3";
 import gameEndSoundFile from "../assets/sounds/game-end.mp3";
+import gameStartSoundFile from "../assets/sounds/game-start.mp3"
 
 const moveSound = new Audio(moveSoundFile);
 const captureSound = new Audio(captureSoundFile);
@@ -11,6 +12,7 @@ const checkSound = new Audio(checkSoundFile);
 const castleSound = new Audio(castleSoundFile);
 const promoteSound = new Audio(promoteSoundFile);
 const gameEndSound = new Audio(gameEndSoundFile);
+const gameStartSound = new Audio(gameStartSoundFile);
 
 const useChessSounds = () => {
 
@@ -44,6 +46,11 @@ const useChessSounds = () => {
     gameEndSound.play();
   };
 
+  const playGameStartSound = ()=>{
+    gameStartSound.currentTime = 0;
+    gameStartSound.play();
+  }
+
   return {
     playMoveSound,
     playCaptureSound,
@@ -51,6 +58,7 @@ const useChessSounds = () => {
     playCastleSound,
     playPromoteSound,
     playGameEndSound,
+    playGameStartSound
   };
 };
 
