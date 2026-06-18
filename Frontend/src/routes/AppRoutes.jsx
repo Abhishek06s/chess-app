@@ -38,19 +38,25 @@ export default function AppRoutes() {
       <Route
         path="/analysis"
         element={
-          <div className="min-h-screen bg-zinc-950 text-white">
-            <Navbar />
-            <Analysis />
-          </div>
+          <ProtectedRoute>
+            {" "}
+            <div className="min-h-screen bg-zinc-950 text-white">
+              <Navbar />
+              <Analysis />
+            </div>
+          </ProtectedRoute>
         }
       />
       <Route
         path="/review"
         element={
-          <div className="min-h-screen bg-zinc-950 text-white">
-            <Navbar />
-            <GameReview />
-          </div>
+          <ProtectedRoute>
+            {" "}
+            <div className="min-h-screen bg-zinc-950 text-white">
+              <Navbar />
+              <GameReview />
+            </div>
+          </ProtectedRoute>
         }
       />
 

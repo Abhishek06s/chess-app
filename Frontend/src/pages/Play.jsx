@@ -7,6 +7,7 @@ import PlayerCard from "../components/PlayerCard";
 
 import useChessClock from "../hooks/useChessClock";
 import useCapturedPieces from "../hooks/useCapturedPieces";
+import { generateGuestUser } from "../utils/guestUtil";
 import { useAuth } from "../context/authContext";
 import useChessSounds from "../hooks/useChessSounds";
 
@@ -15,7 +16,7 @@ const Play = () => {
 
   const [guestUser, setGuestUser] = useState(null);
   const activeUser = authUser || guestUser;
-  const isLoggedIn = !!activeUser;
+  const isLoggedIn = !!authUser;
 
   const [game, setGame] = useState(new Chess());
   const [moves, setMoves] = useState([]);
@@ -60,6 +61,14 @@ const Play = () => {
   const blackFlagged = blackTime === 0;
   const isGameOver =
     game.isGameOver() || whiteFlagged || blackFlagged || !!endgame.type;
+
+  useEffect(() => {
+    const storedGuest = localStorage.getItem("guestUser");
+
+    if (storedGuest) {
+      setGuestUser(JSON.parse(storedGuest));
+    }
+  }, []);
 
   useEffect(() => {
     if (whiteFlagged) {
@@ -219,6 +228,7 @@ const Play = () => {
             blackFlagged={blackFlagged}
             resetCapturedPieces={resetCapturedPieces}
             isLoggedIn={isLoggedIn}
+            activeUser={activeUser}
             onAuthRequired={() => setShowAuthModal(true)}
             timeControl={timeControl}
             setTimeControl={setTimeControl}
@@ -253,24 +263,9 @@ const Play = () => {
               </button>
               <button
                 onClick={() => {
-                  setGuestUser({
-                    username: "Guest Player",
-                    isGuest: true,
-
-                    stats: {
-                      bullet: {
-                        rating: 1500,
-                      },
-
-                      blitz: {
-                        rating: 1500,
-                      },
-
-                      rapid: {
-                        rating: 1500,
-                      },
-                    },
-                  });
+                  const guest = generateGuestUser();
+                  setGuestUser(guest);
+                  localStorage.setItem("guestUser", JSON.stringify(guest));
                   setShowAuthModal(false);
                 }}
                 className="w-full py-3.5 bg-zinc-800 hover:bg-zinc-750 text-sm font-semibold transition rounded-xl text-zinc-300 border border-white/10"

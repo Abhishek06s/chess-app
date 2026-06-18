@@ -50,6 +50,7 @@ const GameSidebar = ({
   blackFlagged,
   resetCapturedPieces,
   isLoggedIn,
+  activeUser,
   onAuthRequired,
   timeControl,
   setTimeControl,
@@ -125,7 +126,7 @@ const GameSidebar = ({
   }
 
   const handleNewGame = () => {
-    if (!isLoggedIn) {
+    if (!isLoggedIn && !activeUser?.isGuest) {
       onAuthRequired();
       return;
     }
@@ -178,7 +179,7 @@ const GameSidebar = ({
               <div className="relative">
                 <button
                   onClick={() => setShowShareMenu(!showShareMenu)}
-                  className="py-2.5 px-4 text-xs font-semibold rounded-xl bg-purple-600 hover:bg-purple-500 transition shadow flex items-center gap-1 cursor-pointer"
+                  className="w-20 py-2.5 px-4 text-xs font-semibold rounded-xl bg-purple-600 hover:bg-purple-500 transition shadow flex items-center justify-center gap-1 cursor-pointer"
                 >
                   Share
                 </button>
