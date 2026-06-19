@@ -6,6 +6,12 @@ export const getProfile = async () => {
   return response.data;
 };
 
+export const getUserByUsername = async (username) => {
+  const response = await api.get(`/users/profile/${username}`);
+
+  return response.data;
+};
+
 export const getLeaderboard = async (mode) => {
   const response = await api.get(`/users/leaderboard?mode=${mode}`);
 

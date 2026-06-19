@@ -254,9 +254,11 @@ const Analysis = () => {
   const numericEval = isMate ? 0 : Number(evaluation || 0);
 
   const barHeight = isMate
-    ? evaluation.includes("-")
+    ? evaluation.includes("-") || evaluation === "0-1"
       ? 0
-      : 100
+      : evaluation.includes("+") || evaluation === "1-0"
+        ? 100
+        : 50
     : Math.min(Math.max(50 + numericEval * 8, 5), 95);
 
   const evalBarStyle =
@@ -377,7 +379,7 @@ const Analysis = () => {
                 onClick={() =>
                   navigate("/review", {
                     state: {
-                      pgn: exportTreeToPgn(rootNode , pgnHeaders),
+                      pgn: exportTreeToPgn(rootNode, pgnHeaders),
                     },
                   })
                 }

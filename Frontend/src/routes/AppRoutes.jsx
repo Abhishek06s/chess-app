@@ -72,6 +72,15 @@ export default function AppRoutes() {
         }
       />
       <Route
+        path="/profile/:username"
+        element={
+          <div className="min-h-screen bg-zinc-950 text-white">
+            <Navbar />
+            <Profile />
+          </div>
+        }
+      />
+      <Route
         path="/leaderboard"
         element={
           <div className="min-h-screen bg-zinc-950 text-white">

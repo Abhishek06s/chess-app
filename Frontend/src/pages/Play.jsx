@@ -152,6 +152,7 @@ const Play = () => {
         whiteTimeRemaining: formattedWhiteTime,
         blackTimeRemaining: formattedBlackTime,
         opponentType: "bot",
+        opponentName: "Stockfish Bot",
         rated: true,
         termination,
         status: "completed",
@@ -238,7 +239,6 @@ const Play = () => {
     if (actionType === "abort") {
       setGameResult("❌ Game Aborted");
       setEndgame({ type: "abort", winner: null });
-      saveGameToDatabase("1/2-1/2", "abort", whiteTime, blackTime);
     } else if (actionType === "resign") {
       const winner = game.turn() === "w" ? "Black" : "White";
       const winnerColor = game.turn() === "w" ? "b" : "w";

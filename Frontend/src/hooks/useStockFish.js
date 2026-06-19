@@ -4,11 +4,9 @@ import { Chess } from "chess.js";
 const useStockfish = (fen) => {
   const workerRef = useRef(null);
 
-  const fenRef = useRef(fen);
-  const sideToMoveRef = useRef("w");
+  const analyzingFenRef = useRef(fen);
   const linesCacheRef = useRef([]);
 
-  // State managers to prevent WASM memory crashes
   const isSearchingRef = useRef(false);
   const pendingFenRef = useRef(null);
 
@@ -17,13 +15,6 @@ const useStockfish = (fen) => {
   const [depth, setDepth] = useState(0);
   const [topLines, setTopLines] = useState([]);
 
-  useEffect(() => {
-    fenRef.current = fen;
-    const parts = fen ? fen.split(" ") : [];
-    sideToMoveRef.current = parts[1] || "w";
-  }, [fen]);
-
-  // 1. Initialize Worker ONLY ONCE on mount
   useEffect(() => {
     const worker = new Worker("/stockfish/stockfish-18-lite-single.js");
     workerRef.current = worker;
@@ -36,8 +27,10 @@ const useStockfish = (fen) => {
       const line = event.data;
       if (typeof line !== "string") return;
 
-      const currentFen = fenRef.current;
-      const sideToMove = sideToMoveRef.current;
+      const activeFen = analyzingFenRef.current;
+      if (!activeFen) return;
+
+      const sideToMove = activeFen.split(" ")[1] || "w";
 
       if (line.includes(" depth ")) {
         const depthMatch = line.match(/\bdepth (\d+)\b/);
@@ -77,19 +70,24 @@ const useStockfish = (fen) => {
           const rawMoves = pvMovesMatch[1].split(" ");
 
           try {
-            const cleanGame = new Chess(currentFen);
+            const cleanGame = new Chess(activeFen);
             const readableMoves = [];
             const movesToParse = Math.min(rawMoves.length, 4);
 
             for (let i = 0; i < movesToParse; i++) {
               const m = rawMoves[i];
               if (!m || m.length < 4) continue;
-              const moveObj = cleanGame.move({
-                from: m.slice(0, 2),
-                to: m.slice(2, 4),
-                promotion: m[4] || undefined,
-              });
-              if (moveObj) readableMoves.push(moveObj.san);
+
+              try {
+                const moveObj = cleanGame.move({
+                  from: m.slice(0, 2),
+                  to: m.slice(2, 4),
+                  promotion: m[4] || undefined,
+                });
+                readableMoves.push(moveObj.san);
+              } catch (moveErr) {
+                break;
+              }
             }
 
             let lineEval = "0.00";
@@ -123,8 +121,6 @@ const useStockfish = (fen) => {
         }
       }
 
-      // PROGRESSIVE BEST MOVE UPDATE
-      // Reads the engine's current top choice before it finishes the full depth
       if (
         line.includes(" depth ") &&
         line.includes(" pv ") &&
@@ -134,7 +130,7 @@ const useStockfish = (fen) => {
         if (pvMatch && pvMatch[1]) {
           const rawMove = pvMatch[1];
           try {
-            const cleanGame = new Chess(currentFen);
+            const cleanGame = new Chess(activeFen);
             const moveObj = cleanGame.move({
               from: rawMove.slice(0, 2),
               to: rawMove.slice(2, 4),
@@ -142,42 +138,39 @@ const useStockfish = (fen) => {
             });
             if (moveObj) setBestMove(moveObj.san);
           } catch (e) {
-            // Fallback to the raw UCI move if chess.js throws an error
             setBestMove(rawMove);
           }
         }
       }
 
-      // Handle the end of a search cleanly
       if (line.startsWith("bestmove")) {
-        isSearchingRef.current = false; // The engine has safely stopped
+        isSearchingRef.current = false;
 
-        // If a FEN was queued up while we were stopping, start it now
         if (pendingFenRef.current) {
           const nextFen = pendingFenRef.current;
-          pendingFenRef.current = null; // Clear the queue
+          pendingFenRef.current = null;
 
+          analyzingFenRef.current = nextFen;
           workerRef.current.postMessage(`position fen ${nextFen}`);
           workerRef.current.postMessage("go depth 22");
           isSearchingRef.current = true;
-        }
-
-        // Standard bestmove parsing
-        const rawMove = line.split(" ")[1];
-        if (rawMove && rawMove !== "(none)" && rawMove.length >= 4) {
-          try {
-            const cleanGame = new Chess(currentFen);
-            const moveObj = cleanGame.move({
-              from: rawMove.slice(0, 2),
-              to: rawMove.slice(2, 4),
-              promotion: rawMove[4] || undefined,
-            });
-            if (moveObj) setBestMove(moveObj.san);
-          } catch (e) {
-            setBestMove(rawMove);
-          }
         } else {
-          setBestMove("-");
+          const rawMove = line.split(" ")[1];
+          if (rawMove && rawMove !== "(none)" && rawMove.length >= 4) {
+            try {
+              const cleanGame = new Chess(activeFen);
+              const moveObj = cleanGame.move({
+                from: rawMove.slice(0, 2),
+                to: rawMove.slice(2, 4),
+                promotion: rawMove[4] || undefined,
+              });
+              if (moveObj) setBestMove(moveObj.san);
+            } catch (e) {
+              setBestMove(rawMove);
+            }
+          } else {
+            setBestMove("-");
+          }
         }
       }
     };
@@ -190,7 +183,6 @@ const useStockfish = (fen) => {
     };
   }, []);
 
-  // 2. Control the Engine safely when the FEN changes
   useEffect(() => {
     if (
       !fen ||
@@ -225,7 +217,7 @@ const useStockfish = (fen) => {
         return;
       }
     } catch (e) {
-      console.error("Game Over validation check failed:", e);
+      return;
     }
 
     setBestMove("-");
@@ -233,15 +225,12 @@ const useStockfish = (fen) => {
     setDepth(0);
     linesCacheRef.current = [];
 
-    // Safe Command Routing
     if (workerRef.current) {
       if (isSearchingRef.current) {
-        // Engine is currently crunching a previous move.
-        // Queue the new FEN and ask it to stop gracefully.
         pendingFenRef.current = fen;
         workerRef.current.postMessage("stop");
       } else {
-        // Engine is idle. Start immediately.
+        analyzingFenRef.current = fen;
         workerRef.current.postMessage(`position fen ${fen}`);
         workerRef.current.postMessage("go depth 22");
         isSearchingRef.current = true;

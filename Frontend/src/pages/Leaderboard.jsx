@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getLeaderboard } from "../services/user.service";
 import { Trophy, Medal } from "lucide-react";
+import { NavLink } from "react-router-dom";
 
 const Leaderboard = () => {
   const [players, setPlayers] = useState([]);
@@ -115,7 +116,12 @@ const Leaderboard = () => {
 
                     {/* Player Name */}
                     <td className="p-5 font-medium text-zinc-100 group-hover:text-emerald-400 transition-colors">
-                      {player.username}
+                      <NavLink
+                        to={`/profile/${player.username}`}
+                        className="hover:text-indigo-400 transition-colors"
+                      >
+                        {player.username}
+                      </NavLink>
                     </td>
 
                     {/* Rating */}

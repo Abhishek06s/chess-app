@@ -1,5 +1,6 @@
 const Game = require("../models/game.model");
 const User = require("../models/user.model");
+const { calculateNewRating } = require("../utils/elo.util");
 
 /**
  * Create Game
@@ -19,6 +20,7 @@ const createGame = async (req, res) => {
       whiteTimeRemaining,
       blackTimeRemaining,
       opponentType,
+      opponentName,
       rated,
       termination,
       status,
@@ -26,15 +28,25 @@ const createGame = async (req, res) => {
 
     
     if (!timeControl || typeof timeControl.base !== "number") {
-      return res.status(400).json({ success: false, message: "Invalid time control" });
+      return res
+      .status(400)
+      .json({ success: false, message: "Invalid time control" });
     }
-
+    
     const validGameTypes = ["bullet", "blitz", "rapid"];
     if (!validGameTypes.includes(gameType)) {
-      return res.status(400).json({ success: false, message: "Invalid game type" });
+      return res
+      .status(400)
+      .json({ success: false, message: "Invalid game type" });
+    }
+    
+    if (termination === "abort") {
+      return res.status(400).json({
+        success: false,
+        message: "Aborted games are not stored",
+      });
     }
 
-    
     const finalWhitePlayer = whitePlayer || req.user._id;
     const finalBlackPlayer = blackPlayer || req.user._id;
 
@@ -51,6 +63,7 @@ const createGame = async (req, res) => {
       whiteTimeRemaining,
       blackTimeRemaining,
       opponentType,
+      opponentName,
       rated,
       termination,
       status,
@@ -82,7 +95,6 @@ const createGame = async (req, res) => {
       }
 
       await whiteUser.save();
-
     } else {
       /**
        * MULTIPLAYER HANDLING (Different Player IDs)

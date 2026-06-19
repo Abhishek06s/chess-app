@@ -5,13 +5,17 @@ const gameSchema = new mongoose.Schema(
     whitePlayer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: function() { return this.opponentType === "human"; }
+      required: function () {
+        return this.opponentType === "human";
+      },
     },
 
     blackPlayer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: function() { return this.opponentType === "human"; }
+      required: function () {
+        return this.opponentType === "human";
+      },
     },
 
     pgn: {
@@ -82,6 +86,11 @@ const gameSchema = new mongoose.Schema(
       required: true,
     },
 
+    opponentName: {
+      type: String,
+      default: "Stockfish Bot",
+    },
+
     rated: {
       type: Boolean,
       default: false,
@@ -97,7 +106,6 @@ const gameSchema = new mongoose.Schema(
         "stalemate",
         "insufficient-material",
         "threefold-repetition",
-        "abort",
       ],
       required: true,
     },
