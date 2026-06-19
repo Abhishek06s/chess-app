@@ -4,6 +4,7 @@ import { Chess } from "chess.js";
 import ChessBoard from "../components/ChessBoard";
 import GameSidebar from "../components/GameSidebar";
 import PlayerCard from "../components/PlayerCard";
+import MultiplayerTester from "../components/MultiplayerTester";
 
 import useChessClock from "../hooks/useChessClock";
 import useCapturedPieces from "../hooks/useCapturedPieces";
@@ -416,6 +417,11 @@ const Play = () => {
           </div>
         </div>
       )}
+
+      <div className="mt-4">
+        {import.meta.env.DEV && <MultiplayerTester />}
+      </div>
+      
     </div>
   );
 };
