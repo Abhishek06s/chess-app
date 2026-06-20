@@ -237,23 +237,11 @@ export async function isGreatMove({
 
   const isTightOnlyMove = winEquityGap >= 0.2;
 
-  if(move.lan === "f5d3"){
-  console.log({
-    isOnlyMoveKeepingAdvantage, isTightOnlyMove, isWinningSurge
-  });}
 
     if (isWinningSurge || isTightOnlyMove || isOnlyMoveKeepingAdvantage) {
       seenGreatPositions.add(greatPositionKey);
       return true;
     }
-  }
-
-  if(move.lan === "d6d5"){
-  console.log({
-    isTopMove, isForced, isBookMove, isRecapture,
-    isObviousEscape, isForcedTacticalChoice, isForcedKingEscape,
-    winEquityGap
-  });
   }
 
 

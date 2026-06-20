@@ -13,7 +13,6 @@ import { useAuth } from "../context/authContext";
 import useChessSounds from "../hooks/useChessSounds";
 
 import { createGame } from "../services/game.service";
-
 import openings from "../data/openings";
 
 const calculateGameType = (baseInSeconds, incrementInSeconds) => {
@@ -39,14 +38,21 @@ const Play = () => {
   const [gameResult, setGameResult] = useState("");
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [endgame, setEndgame] = useState({ type: null, winner: null });
-
+  const [gameMode, setGameMode] = useState("bot");
+  const [showMultiplayerLobby, setShowMultiplayerLobby] = useState(false);
   const [timeControl, setTimeControl] = useState({ base: 600, increment: 0 });
 
+  const [roomId, setRoomId] = useState("");
+  const [multiplayerColor, setMultiplayerColor] = useState(null);
+
+  const [whitePlayerName, setWhitePlayerName] = useState("White");
+  const [blackPlayerName, setBlackPlayerName] = useState("Black");
+  const [whitePlayerRating, setWhitePlayerRating] = useState(1200);
+  const [blackPlayerRating, setBlackPlayerRating] = useState(1200);
+  const [whitePlayerId, setWhitePlayerId] = useState(null);
+  const [blackPlayerId, setBlackPlayerId] = useState(null);
+
   const gameType = calculateGameType(timeControl.base, timeControl.increment);
-  const playerRating =
-    activeUser?.stats?.[gameType]?.rating ??
-    activeUser?.stats?.rapid?.rating ??
-    1200;
 
   const { whiteTime, blackTime, resetClock } = useChessClock(
     game,
@@ -84,11 +90,28 @@ const Play = () => {
     }
   }, []);
 
+  useEffect(() => {
+    if (activeUser && gameMode === "bot") {
+      const userRating =
+        activeUser.stats?.[gameType]?.rating || activeUser.rating || 1200;
+
+      if (playerColor === "white") {
+        setWhitePlayerRating(userRating);
+        setBlackPlayerRating(1500);
+      } else {
+        setBlackPlayerRating(userRating);
+        setWhitePlayerRating(1500);
+      }
+    }
+  }, [activeUser, gameMode, gameType, playerColor]);
+
   const saveGameToDatabase = async (
     result,
     termination,
     finalWhiteTime,
     finalBlackTime,
+    overrideOpponentType,
+    overrideOpponentName,
   ) => {
     if (!user) return;
 
@@ -133,13 +156,24 @@ const Play = () => {
       }
 
       const currentUserId = user._id || user.id;
+      const isMultiplayer = gameMode === "multiplayer";
+
+      const finalOpponentType =
+        overrideOpponentType || (isMultiplayer ? "human" : "bot");
+      const finalOpponentName =
+        overrideOpponentName ||
+        (isMultiplayer
+          ? playerColor === "white"
+            ? blackPlayerName
+            : whitePlayerName
+          : "Stockfish Bot");
 
       const formattedWhiteTime = Math.max(0, Math.round(finalWhiteTime / 1000));
       const formattedBlackTime = Math.max(0, Math.round(finalBlackTime / 1000));
 
       await createGame({
-        whitePlayer: currentUserId,
-        blackPlayer: currentUserId,
+        whitePlayer: gameMode === "multiplayer" ? whitePlayerId : currentUserId,
+        blackPlayer: gameMode === "multiplayer" ? blackPlayerId : currentUserId,
         pgn: finalPgn,
         fen: finalFen,
         moves: finalMovesArray,
@@ -152,8 +186,8 @@ const Play = () => {
         gameType,
         whiteTimeRemaining: formattedWhiteTime,
         blackTimeRemaining: formattedBlackTime,
-        opponentType: "bot",
-        opponentName: "Stockfish Bot",
+        opponentType: finalOpponentType,
+        opponentName: finalOpponentName,
         rated: true,
         termination,
         status: "completed",
@@ -256,6 +290,13 @@ const Play = () => {
     chessSounds.playGameEndSound();
   };
 
+  useEffect(() => {
+    if (multiplayerColor) {
+      setPlayerColor(multiplayerColor);
+      setBoardOrientation(multiplayerColor);
+    }
+  }, [multiplayerColor]);
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">
@@ -278,11 +319,18 @@ const Play = () => {
       </h1>
 
       <div className="grid lg:grid-cols-[550px_1fr] gap-8 xl:gap-12 items-start">
-        {/* Board Container Column */}
         <div className="flex flex-col gap-4 max-w-137.5">
           <PlayerCard
-            name="Opponent (Bot)"
-            rating={playerRating + 155}
+            name={
+              gameMode === "multiplayer"
+                ? playerColor === "white"
+                  ? blackPlayerName
+                  : whitePlayerName
+                : "Opponent (Bot)"
+            }
+            rating={
+              playerColor === "white" ? blackPlayerRating : whitePlayerRating
+            }
             isOnline={true}
             color={playerColor === "white" ? "black" : "white"}
             time={playerColor === "white" ? blackTime : whiteTime}
@@ -317,17 +365,25 @@ const Play = () => {
               lastMove={lastMove}
               setLastMove={setLastMove}
               endgame={endgame}
-              routerChangeMoves={moves}
+              gameMode={gameMode}
+              roomId={roomId}
+              multiplayerColor={multiplayerColor}
             />
           </div>
 
           <PlayerCard
             name={
-              activeUser
-                ? activeUser.username || activeUser.name || "You"
-                : "You"
+              gameMode === "multiplayer"
+                ? playerColor === "white"
+                  ? whitePlayerName
+                  : blackPlayerName
+                : activeUser
+                  ? activeUser.username || activeUser.name || "You"
+                  : "You"
             }
-            rating={playerRating}
+            rating={
+              playerColor === "white" ? whitePlayerRating : blackPlayerRating
+            }
             isOnline={true}
             color={playerColor}
             time={playerColor === "white" ? whiteTime : blackTime}
@@ -347,7 +403,6 @@ const Play = () => {
           />
         </div>
 
-        {/* Action Panel Sidebar Column */}
         <div className="bg-zinc-900 rounded-2xl border border-white/10 p-6 shadow-xl h-165">
           <GameSidebar
             moves={moves}
@@ -369,11 +424,13 @@ const Play = () => {
             setTimeControl={setTimeControl}
             onGameAction={handleGameAction}
             setEndgame={setEndgame}
+            gameMode={gameMode}
+            setGameMode={setGameMode}
+            openMultiplayerLobby={() => setShowMultiplayerLobby(true)}
           />
         </div>
       </div>
 
-      {/* AUTH OVERLAY SCREEN */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
           <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center">
@@ -418,10 +475,45 @@ const Play = () => {
         </div>
       )}
 
-      <div className="mt-4">
-        {import.meta.env.DEV && <MultiplayerTester />}
-      </div>
-      
+      {showMultiplayerLobby && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50">
+          <MultiplayerTester
+            activeUser={activeUser}
+            timeControl={timeControl}
+            onClose={() => setShowMultiplayerLobby(false)}
+            onGameStarted={({
+              roomId,
+              color,
+              whiteName,
+              blackName,
+              whiteRating,
+              blackRating,
+              whiteId,
+              blackId,
+            }) => {
+              resetClock();
+              setGame(new Chess());
+              setMoves([]);
+              resetCapturedPieces();
+              setEndgame({ type: null, winner: null });
+              setGameResult("");
+
+              setWhitePlayerName(whiteName);
+              setBlackPlayerName(blackName);
+              setWhitePlayerRating(whiteRating);
+              setBlackPlayerRating(blackRating);
+              setWhitePlayerId(whiteId);
+              setBlackPlayerId(blackId);
+
+              setRoomId(roomId);
+              setMultiplayerColor(color);
+              setGameMode("multiplayer");
+              setGameStarted(true);
+              setShowMultiplayerLobby(false);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };

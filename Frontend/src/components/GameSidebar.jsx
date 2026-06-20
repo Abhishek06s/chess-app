@@ -56,6 +56,9 @@ const GameSidebar = ({
   setTimeControl,
   onGameAction,
   setEndgame,
+  gameMode,
+  setGameMode,
+  openMultiplayerLobby,
 }) => {
   const navigate = useNavigate();
   const [showShareMenu, setShowShareMenu] = useState(false);
@@ -130,13 +133,21 @@ const GameSidebar = ({
       onAuthRequired();
       return;
     }
+
+    if (gameMode === "multiplayer") {
+      openMultiplayerLobby();
+      return;
+    }
+    
+    resetClock();
     setGame(new Chess());
     setMoves([]);
-    resetClock();
     resetCapturedPieces();
     setGameStarted(true);
     setEndgame({ type: null, winner: null });
     gameStartSound();
+
+
   };
 
   const applyCustomTime = () => {
@@ -207,6 +218,21 @@ const GameSidebar = ({
         {/* Configuration Setup Module: Visible only when match is idle */}
         {!isMatchRunning && (
           <div className="space-y-4 mb-5">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setGameMode("bot")}
+                className={`rounded px-2 py-1 cursor-pointer ${gameMode === "bot" ? "bg-blue-300" : "bg-orange-300"}`}
+              >
+                <span className="text-gray-800 font-semibold">Bot</span>
+              </button>
+
+              <button
+                onClick={() => setGameMode("multiplayer")}
+                className={`rounded px-2 py-1 cursor-pointer ${gameMode === "multiplayer" ? "bg-blue-300" : "bg-orange-300"}`}
+              >
+                <span className="text-gray-800 font-semibold">Multiplayer</span>
+              </button>
+            </div>
             <div className="flex items-center gap-3 w-full">
               <button
                 onClick={handleNewGame}
