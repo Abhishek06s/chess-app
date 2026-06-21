@@ -22,6 +22,41 @@ const initializeSocket = (server) => {
   io.on("connection", (socket) => {
     console.log("User Connected:", socket.id);
 
+    setInterval(() => {
+      for (const roomId in rooms) {
+        const room = rooms[roomId];
+
+        if (!room.lastMoveTime) continue;
+        if (room.gameOver) continue;
+
+        const now = Date.now();
+        const elapsed = now - room.lastMoveTime;
+
+        let whiteTime = room.whiteTimeRemaining;
+        let blackTime = room.blackTimeRemaining;
+
+        if (room.activeColor === "w") {
+          whiteTime = Math.max(0, room.whiteTimeRemaining - elapsed);
+
+          if (whiteTime === 0) {
+            room.gameOver = true;
+          }
+        } else {
+          blackTime = Math.max(0, room.blackTimeRemaining - elapsed);
+
+          if (blackTime === 0) {
+            room.gameOver = true;
+          }
+        }
+
+        io.to(roomId).emit("clock-update", {
+          whiteTimeRemaining: whiteTime,
+          blackTimeRemaining: blackTime,
+          activeColor: room.activeColor,
+        });
+      }
+    }, 100);
+
     socket.on("ping-test", (message) => {
       console.log(message);
     });
@@ -37,12 +72,27 @@ const initializeSocket = (server) => {
       rooms[roomId] = {
         white: socket.id,
         black: null,
+
         whiteName: username,
         blackName: null,
+
         gameType,
+
+        timeControl: {
+          base: timeControl.base,
+          increment: timeControl.increment,
+        },
 
         whiteRating: rating?.[gameType]?.rating || 1200,
         blackRating: null,
+
+        whiteTimeRemaining: timeControl.base * 1000,
+        blackTimeRemaining: timeControl.base * 1000,
+
+        activeColor: "w",
+        lastMoveTime: null,
+
+        gameOver: false,
       };
 
       socket.join(roomId);
@@ -66,21 +116,74 @@ const initializeSocket = (server) => {
       room.blackRating = rating?.[room.gameType]?.rating || 1200;
 
       socket.join(roomId);
+      room.lastMoveTime = Date.now();
+
       io.to(roomId).emit("game-started", {
         roomId,
         white: room.white,
         black: room.black,
+
         whiteName: room.whiteName,
         blackName: room.blackName,
+
         whiteRating: room.whiteRating,
         blackRating: room.blackRating,
+
         gameType: room.gameType,
+
+        timeControl: room.timeControl,
+        whiteTimeRemaining: room.whiteTimeRemaining,
+        blackTimeRemaining: room.blackTimeRemaining,
       });
       console.log(`Player joined ${roomId}`);
     });
 
     socket.on("move", ({ roomId, move }) => {
-      socket.to(roomId).emit("opponent-move", move);
+      const room = rooms[roomId];
+
+      if (!room) return;
+
+      const now = Date.now();
+      const elapsed = now - room.lastMoveTime;
+
+      if (room.activeColor === "w") {
+        room.whiteTimeRemaining -= elapsed;
+        room.whiteTimeRemaining += room.timeControl.increment * 1000;
+
+        if (room.whiteTimeRemaining < 0) {
+          room.whiteTimeRemaining = 0;
+        }
+
+        room.activeColor = "b";
+      } else {
+        room.blackTimeRemaining -= elapsed;
+        room.blackTimeRemaining += room.timeControl.increment * 1000;
+
+        if (room.blackTimeRemaining < 0) {
+          room.blackTimeRemaining = 0;
+        }
+
+        room.activeColor = "w";
+      }
+
+      room.lastMoveTime = now;
+
+      socket.to(roomId).emit("opponent-move", {
+        move,
+
+        whiteTimeRemaining: room.whiteTimeRemaining,
+        blackTimeRemaining: room.blackTimeRemaining,
+
+        activeColor: room.activeColor,
+      });
+    });
+
+    socket.on("game-over", ({ roomId }) => {
+      const room = rooms[roomId];
+
+      if (!room) return;
+
+      room.gameOver = true;
     });
   });
 };

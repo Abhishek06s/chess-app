@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { socket } from "../services/socket.service";
 
-const MultiplayerTester = ({ activeUser, timeControl, onClose, onGameStarted }) => {
+const MultiplayerTester = ({
+  activeUser,
+  timeControl,
+  onClose,
+  onGameStarted,
+  setMultiplayerBlackTime,
+  setMultiplayerWhiteTime,
+}) => {
   const [roomCode, setRoomCode] = useState("");
   const [createdRoom, setCreatedRoom] = useState("");
   const [playerColor, setPlayerColor] = useState("");
@@ -24,19 +31,35 @@ const MultiplayerTester = ({ activeUser, timeControl, onClose, onGameStarted }) 
       onGameStarted({
         roomId: data.roomId,
         color,
+
         whiteName: data.whiteName,
         blackName: data.blackName,
+
         whiteRating: data.whiteRating || 1200,
         blackRating: data.blackRating || 1200,
+
         whiteId: data.white,
         blackId: data.black,
+
+        timeControl: data.timeControl,
+
+        whiteTimeRemaining: data.whiteTimeRemaining,
+        blackTimeRemaining: data.blackTimeRemaining,
       });
     });
 
-    socket.on("opponent-move", (move) => {
-      console.log("Opponent Move:", move);
+    socket.on(
+      "opponent-move",
+      ({ move, whiteTimeRemaining, blackTimeRemaining, activeColor }) => {
+        console.log("Opponent Move:", move);
+      },
+    );
+
+    socket.on("clock-update", (data) => {
+      setMultiplayerWhiteTime(data.whiteTimeRemaining);
+      setMultiplayerBlackTime(data.blackTimeRemaining);
     });
-    
+
     socket.on("room-error", (msg) => {
       console.log(msg);
     });
@@ -75,7 +98,7 @@ const MultiplayerTester = ({ activeUser, timeControl, onClose, onGameStarted }) 
             socket.emit("create-room", {
               username: activeUser.username,
               rating: activeUser.stats,
-              timeControl, 
+              timeControl,
             })
           }
           className="px-3 py-2 bg-indigo-600 rounded-lg cursor-pointer"

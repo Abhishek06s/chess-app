@@ -17,6 +17,8 @@ const ChessBoard = ({
   gameMode,
   roomId,
   multiplayerColor,
+  setMultiplayerWhiteTime,
+  setMultiplayerBlackTime,
 }) => {
   const {
     playMoveSound,
@@ -30,45 +32,47 @@ const ChessBoard = ({
   useEffect(() => {
     if (gameMode !== "multiplayer") return;
 
-    const handleOpponentMove = (move) => {
-      setGame((prevGame) => {
-        const gameCopy = new Chess(prevGame.fen());
-        try {
-          const capturedPiece = prevGame.get(move.to);
-          const result = gameCopy.move(move);
+    const handleOpponentMove = ({
+      move,
+      whiteTimeRemaining,
+      blackTimeRemaining,
+      activeColor,
+    }) => {
+      setMultiplayerWhiteTime(whiteTimeRemaining);
+      setMultiplayerBlackTime(blackTimeRemaining);
+      const gameCopy = new Chess(game.fen());
 
-          if (!result) return prevGame;
+      try {
+        const capturedPiece = gameCopy.get(move.to);
+        const result = gameCopy.move(move);
 
-          setMoves((prev) => [...prev, result.san]);
-          setLastMove({ from: move.from, to: move.to });
+        if (!result) return;
 
-          if (capturedPiece) {
-            addCapturedPiece(capturedPiece);
-          }
+        setMoves((prev) => [...prev, result.san]);
+        setLastMove({ from: move.from, to: move.to });
 
-          if (gameCopy.isGameOver()) {
-            playGameEndSound();
-          } else if (gameCopy.isCheck()) {
-            playCheckSound();
-          } else if (result.captured) {
-            playCaptureSound();
-          } else if (result.flags.includes("p")) {
-            playPromoteSound();
-          } else if (result.flags.includes("k") || result.flags.includes("q")) {
-            playCastleSound();
-          } else {
-            playMoveSound();
-          }
-
-          return gameCopy;
-        } catch (err) {
-          console.error(
-            "Invalid dynamic opponent move execution blocked:",
-            err,
-          );
-          return prevGame;
+        if (capturedPiece) {
+          addCapturedPiece(capturedPiece);
         }
-      });
+
+        if (gameCopy.isGameOver()) {
+          playGameEndSound();
+        } else if (gameCopy.isCheck()) {
+          playCheckSound();
+        } else if (result.captured) {
+          playCaptureSound();
+        } else if (result.flags.includes("p")) {
+          playPromoteSound();
+        } else if (result.flags.includes("k") || result.flags.includes("q")) {
+          playCastleSound();
+        } else {
+          playMoveSound();
+        }
+
+        setGame(gameCopy);
+      } catch (err) {
+        console.error("Invalid dynamic opponent move execution blocked:", err);
+      }
     };
 
     socket.on("opponent-move", handleOpponentMove);
@@ -77,6 +81,7 @@ const ChessBoard = ({
       socket.off("opponent-move", handleOpponentMove);
     };
   }, [
+    game,
     gameMode,
     setGame,
     setMoves,

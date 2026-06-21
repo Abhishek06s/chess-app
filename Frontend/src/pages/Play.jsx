@@ -13,6 +13,7 @@ import { useAuth } from "../context/authContext";
 import useChessSounds from "../hooks/useChessSounds";
 
 import { createGame } from "../services/game.service";
+import { socket } from "../services/socket.service";
 import openings from "../data/openings";
 
 const calculateGameType = (baseInSeconds, incrementInSeconds) => {
@@ -52,6 +53,20 @@ const Play = () => {
   const [whitePlayerId, setWhitePlayerId] = useState(null);
   const [blackPlayerId, setBlackPlayerId] = useState(null);
 
+  const [multiplayerWhiteTime, setMultiplayerWhiteTime] = useState(
+    timeControl.base * 1000,
+  );
+  const [multiplayerBlackTime, setMultiplayerBlackTime] = useState(
+    timeControl.base * 1000,
+  );
+
+  useEffect(() => {
+    if (!gameStarted) {
+      setMultiplayerWhiteTime(timeControl.base * 1000);
+      setMultiplayerBlackTime(timeControl.base * 1000);
+    }
+  }, [timeControl.base]);
+
   const gameType = calculateGameType(timeControl.base, timeControl.increment);
 
   const { whiteTime, blackTime, resetClock } = useChessClock(
@@ -61,6 +76,12 @@ const Play = () => {
     timeControl.base,
     timeControl.increment,
   );
+
+  const displayWhiteTime =
+    gameMode === "multiplayer" ? multiplayerWhiteTime : whiteTime;
+
+  const displayBlackTime =
+    gameMode === "multiplayer" ? multiplayerBlackTime : blackTime;
 
   const chessSounds = useChessSounds();
 
@@ -207,11 +228,17 @@ const Play = () => {
       setGameResult("🏆 Black Wins on Time");
       setEndgame({ type: "time", winner: "b" });
       setGameStarted(false);
+      if (gameMode === "multiplayer") {
+        socket.emit("game-over", { roomId });
+      }
       saveGameToDatabase("0-1", "timeout", 0, blackTime);
     } else if (blackFlagged) {
       setGameResult("🏆 White Wins on Time");
       setEndgame({ type: "time", winner: "w" });
       setGameStarted(false);
+      if (gameMode === "multiplayer") {
+        socket.emit("game-over", { roomId });
+      }
       saveGameToDatabase("1-0", "timeout", whiteTime, 0);
     } else if (game.isCheckmate()) {
       const winnerColor = game.turn() === "w" ? "b" : "w";
@@ -219,17 +246,26 @@ const Play = () => {
       setGameResult(`🏆 ${winnerName} Wins by Checkmate`);
       setEndgame({ type: "checkmate", winner: winnerColor });
       setGameStarted(false);
+      if (gameMode === "multiplayer") {
+        socket.emit("game-over", { roomId });
+      }
       const result = winnerColor === "w" ? "1-0" : "0-1";
       saveGameToDatabase(result, "checkmate", whiteTime, blackTime);
     } else if (game.isStalemate()) {
       setGameResult("🤝 Draw by Stalemate");
       setEndgame({ type: "draw", winner: null });
       setGameStarted(false);
+      if (gameMode === "multiplayer") {
+        socket.emit("game-over", { roomId });
+      }
       saveGameToDatabase("1/2-1/2", "stalemate", whiteTime, blackTime);
     } else if (game.isInsufficientMaterial()) {
       setGameResult("🤝 Draw by Insufficient Material");
       setEndgame({ type: "draw", winner: null });
       setGameStarted(false);
+      if (gameMode === "multiplayer") {
+        socket.emit("game-over", { roomId });
+      }
       saveGameToDatabase(
         "1/2-1/2",
         "insufficient-material",
@@ -240,6 +276,9 @@ const Play = () => {
       setGameResult("🤝 Draw by Repetition");
       setEndgame({ type: "draw", winner: null });
       setGameStarted(false);
+      if (gameMode === "multiplayer") {
+        socket.emit("game-over", { roomId });
+      }
       saveGameToDatabase(
         "1/2-1/2",
         "threefold-repetition",
@@ -250,6 +289,9 @@ const Play = () => {
       setGameResult("🤝 Draw");
       setEndgame({ type: "draw", winner: null });
       setGameStarted(false);
+      if (gameMode === "multiplayer") {
+        socket.emit("game-over", { roomId });
+      }
       saveGameToDatabase("1/2-1/2", "draw", whiteTime, blackTime);
     } else {
       if (moves.length === 0) {
@@ -274,17 +316,26 @@ const Play = () => {
     if (actionType === "abort") {
       setGameResult("❌ Game Aborted");
       setEndgame({ type: "abort", winner: null });
+      if (gameMode === "multiplayer") {
+        socket.emit("game-over", { roomId });
+      }
     } else if (actionType === "resign") {
       const winner = game.turn() === "w" ? "Black" : "White";
       const winnerColor = game.turn() === "w" ? "b" : "w";
       setGameResult(`🏆 ${winner} Wins by Resignation`);
       setEndgame({ type: "resignation", winner: winnerColor });
+      if (gameMode === "multiplayer") {
+        socket.emit("game-over", { roomId });
+      }
 
       const result = winnerColor === "w" ? "1-0" : "0-1";
       saveGameToDatabase(result, "resignation", whiteTime, blackTime);
     } else if (actionType === "draw") {
       setGameResult("🤝 Draw by Mutual Agreement");
       setEndgame({ type: "draw", winner: null });
+      if (gameMode === "multiplayer") {
+        socket.emit("game-over", { roomId });
+      }
       saveGameToDatabase("1/2-1/2", "draw", whiteTime, blackTime);
     }
     chessSounds.playGameEndSound();
@@ -333,7 +384,7 @@ const Play = () => {
             }
             isOnline={true}
             color={playerColor === "white" ? "black" : "white"}
-            time={playerColor === "white" ? blackTime : whiteTime}
+            time={playerColor === "white" ? displayBlackTime : displayWhiteTime}
             isActive={
               !isGameOver &&
               gameStarted &&
@@ -368,6 +419,8 @@ const Play = () => {
               gameMode={gameMode}
               roomId={roomId}
               multiplayerColor={multiplayerColor}
+              setMultiplayerWhiteTime={setMultiplayerWhiteTime}
+              setMultiplayerBlackTime={setMultiplayerBlackTime}
             />
           </div>
 
@@ -386,7 +439,7 @@ const Play = () => {
             }
             isOnline={true}
             color={playerColor}
-            time={playerColor === "white" ? whiteTime : blackTime}
+            time={playerColor === "white" ? displayWhiteTime : displayBlackTime}
             isActive={
               !isGameOver &&
               gameStarted &&
@@ -481,6 +534,8 @@ const Play = () => {
             activeUser={activeUser}
             timeControl={timeControl}
             onClose={() => setShowMultiplayerLobby(false)}
+            setMultiplayerBlackTime={setMultiplayerBlackTime}
+            setMultiplayerWhiteTime={setMultiplayerWhiteTime}
             onGameStarted={({
               roomId,
               color,
@@ -490,6 +545,9 @@ const Play = () => {
               blackRating,
               whiteId,
               blackId,
+              timeControl,
+              whiteTimeRemaining,
+              blackTimeRemaining,
             }) => {
               resetClock();
               setGame(new Chess());
@@ -504,6 +562,9 @@ const Play = () => {
               setBlackPlayerRating(blackRating);
               setWhitePlayerId(whiteId);
               setBlackPlayerId(blackId);
+              setTimeControl(timeControl);
+              setMultiplayerWhiteTime(whiteTimeRemaining);
+              setMultiplayerBlackTime(blackTimeRemaining);
 
               setRoomId(roomId);
               setMultiplayerColor(color);

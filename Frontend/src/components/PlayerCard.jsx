@@ -10,7 +10,11 @@ const PlayerCard = ({
   capturedPieces,
   advantage,
 }) => {
-  const formatTime = (ms) => {
+  const formatTime = (ms = 0) => {
+    if (typeof ms !== "number" || Number.isNaN(ms)) {
+      return "0:00";
+    }
+
     const totalSeconds = Math.floor(ms / 1000);
 
     const minutes = Math.floor(totalSeconds / 60);
@@ -25,15 +29,15 @@ const PlayerCard = ({
   };
 
   const getTimeColor = () => {
-    if (time <= 5000) {
+    if ((time ?? 0) <= 5000) {
       return "text-red-500 animate-pulse drop-shadow-lg";
     }
 
-    if (time <= 10000) {
+    if ((time ?? 0) <= 10000) {
       return "text-orange-400";
     }
 
-    if (time <= 30000) {
+    if ((time ?? 0) <= 30000) {
       return "text-yellow-400";
     }
 
