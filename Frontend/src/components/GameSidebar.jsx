@@ -8,6 +8,8 @@ import {
   Zap,
   Clock,
   Sliders,
+  Check,
+  X,
 } from "react-feather";
 import { toast } from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
@@ -59,6 +61,10 @@ const GameSidebar = ({
   gameMode,
   setGameMode,
   openMultiplayerLobby,
+  incomingDrawOffer,
+  drawOfferPending,
+  acceptDrawOffer,
+  declineDrawOffer,
 }) => {
   const navigate = useNavigate();
   const [showShareMenu, setShowShareMenu] = useState(false);
@@ -138,7 +144,7 @@ const GameSidebar = ({
       openMultiplayerLobby();
       return;
     }
-    
+
     resetClock();
     setGame(new Chess());
     setMoves([]);
@@ -146,8 +152,6 @@ const GameSidebar = ({
     setGameStarted(true);
     setEndgame({ type: null, winner: null });
     gameStartSound();
-
-
   };
 
   const applyCustomTime = () => {
@@ -464,6 +468,51 @@ const GameSidebar = ({
               <span>Resign</span>
             </button>
           </div>
+
+          {/* Incoming Draw Offer Alert Box */}
+          {incomingDrawOffer && (
+            <div className="mt-3 p-3 bg-sky-950/30 border border-sky-500/30 rounded-xl space-y-2.5 animate-fade-in shadow-lg">
+              <div className="flex items-center gap-2 text-sky-400">
+                <HelpCircle size={15} className="animate-pulse" />
+                <span className="text-[11px] font-bold uppercase tracking-wider">
+                  Draw Offer Received
+                </span>
+              </div>
+              <p className="text-xs text-zinc-300 leading-normal">
+                Your opponent is offering a mutual draw. Accepting will conclude
+                this game immediately.
+              </p>
+              <div className="grid grid-cols-2 gap-2 pt-0.5">
+                <button
+                  onClick={acceptDrawOffer}
+                  className="flex items-center justify-center gap-1.5 py-2 px-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-all shadow-md active:scale-98 cursor-pointer"
+                >
+                  <Check size={14} strokeWidth={2.5} />
+                  Accept
+                </button>
+                <button
+                  onClick={declineDrawOffer}
+                  className="flex items-center justify-center gap-1.5 py-2 px-3 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 border border-white/5 rounded-lg text-xs font-bold transition-all active:scale-98 cursor-pointer"
+                >
+                  <X size={14} strokeWidth={2.5} />
+                  Decline
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Pending Draw Offer (Sent State) */}
+          {drawOfferPending && !incomingDrawOffer && (
+            <div className="mt-3 p-3 bg-zinc-900/80 border border-white/5 rounded-xl flex items-center justify-center gap-2.5 shadow-inner">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-500"></span>
+              </span>
+              <span className="text-[11px] text-zinc-400 font-medium tracking-wide">
+                Draw offer sent. Waiting for opponent...
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

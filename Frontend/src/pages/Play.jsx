@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Chess } from "chess.js";
+import { Trophy, Scale, XCircle } from "lucide-react";
 
 import ChessBoard from "../components/ChessBoard";
 import GameSidebar from "../components/GameSidebar";
@@ -15,6 +16,40 @@ import useChessSounds from "../hooks/useChessSounds";
 import { createGame } from "../services/game.service";
 import { socket } from "../services/socket.service";
 import openings from "../data/openings";
+
+const getBannerConfig = (resultString) => {
+  if (resultString.includes("Wins")) {
+    return {
+      icon: <Trophy className="w-6 h-6 text-yellow-300 drop-shadow-md" />,
+      bg: "bg-gradient-to-r from-emerald-600 to-teal-600",
+      border: "border-emerald-400/40",
+      shadow: "shadow-emerald-900/50",
+    };
+  }
+  if (resultString.includes("Draw")) {
+    return {
+      icon: <Scale className="w-6 h-6 text-blue-200 drop-shadow-md" />,
+      bg: "bg-gradient-to-r from-slate-700 to-slate-600",
+      border: "border-slate-400/40",
+      shadow: "shadow-slate-900/50",
+    };
+  }
+  if (resultString.includes("Aborted")) {
+    return {
+      icon: <XCircle className="w-6 h-6 text-red-100 drop-shadow-md" />,
+      bg: "bg-gradient-to-r from-red-600 to-rose-600",
+      border: "border-red-400/40",
+      shadow: "shadow-red-900/50",
+    };
+  }
+
+  return {
+    icon: <Trophy className="w-6 h-6 text-zinc-200" />,
+    bg: "bg-zinc-800",
+    border: "border-zinc-600",
+    shadow: "shadow-black/50",
+  };
+};
 
 const calculateGameType = (baseInSeconds, incrementInSeconds) => {
   const totalEstimatedTime = baseInSeconds + incrementInSeconds * 40;
@@ -45,6 +80,9 @@ const Play = () => {
 
   const [roomId, setRoomId] = useState("");
   const [multiplayerColor, setMultiplayerColor] = useState(null);
+
+  const [incomingDrawOffer, setIncomingDrawOffer] = useState(false);
+  const [drawOfferPending, setDrawOfferPending] = useState(false);
 
   const [whitePlayerName, setWhitePlayerName] = useState("White");
   const [blackPlayerName, setBlackPlayerName] = useState("Black");
@@ -99,8 +137,12 @@ const Play = () => {
     setBoardOrientation((prev) => (prev === "white" ? "black" : "white"));
   };
 
-  const whiteFlagged = whiteTime === 0;
-  const blackFlagged = blackTime === 0;
+  const whiteFlagged =
+    gameMode === "multiplayer" ? multiplayerWhiteTime === 0 : whiteTime === 0;
+
+  const blackFlagged =
+    gameMode === "multiplayer" ? multiplayerBlackTime === 0 : blackTime === 0;
+
   const isGameOver =
     game.isGameOver() || whiteFlagged || blackFlagged || !!endgame.type;
 
@@ -125,6 +167,174 @@ const Play = () => {
       }
     }
   }, [activeUser, gameMode, gameType, playerColor]);
+
+  /**
+   * DRAW CONDITION
+   */
+
+  useEffect(() => {
+    const handleDrawOfferReceived = () => {
+      setIncomingDrawOffer(true);
+    };
+
+    const handleDrawAccepted = () => {
+      setIncomingDrawOffer(false);
+      setDrawOfferPending(false);
+
+      setGameStarted(false);
+
+      setGameResult("🤝 Draw by Mutual Agreement");
+
+      setEndgame({
+        type: "draw",
+        winner: null,
+      });
+
+      chessSounds.playGameEndSound();
+    };
+
+    const handleDrawDeclined = () => {
+      setIncomingDrawOffer(false);
+      setDrawOfferPending(false);
+    };
+
+    socket.on("draw-offer-received", handleDrawOfferReceived);
+    socket.on("draw-accepted", handleDrawAccepted);
+    socket.on("draw-declined", handleDrawDeclined);
+
+    return () => {
+      socket.off("draw-offer-received", handleDrawOfferReceived);
+      socket.off("draw-accepted", handleDrawAccepted);
+      socket.off("draw-declined", handleDrawDeclined);
+    };
+  }, []);
+
+  const acceptDrawOffer = () => {
+    socket.emit("draw-response", {
+      roomId,
+      accepted: true,
+    });
+  };
+
+  const declineDrawOffer = () => {
+    socket.emit("draw-response", {
+      roomId,
+      accepted: false,
+    });
+
+    setIncomingDrawOffer(false);
+  };
+
+  /**
+   * RESIGN CONDITION
+   */
+
+  useEffect(() => {
+    const handlePlayerResigned = ({ winner }) => {
+      setGameStarted(false);
+
+      const winnerName = winner === "white" ? "White" : "Black";
+
+      setGameResult(`🏆 ${winnerName} Wins by Resignation`);
+
+      setEndgame({
+        type: "resignation",
+        winner: winner === "white" ? "w" : "b",
+      });
+
+      chessSounds.playGameEndSound();
+    };
+
+    socket.on("player-resigned", handlePlayerResigned);
+
+    return () => {
+      socket.off("player-resigned", handlePlayerResigned);
+    };
+  }, []);
+
+  /**
+   * ABORT CONDITION
+   */
+
+  useEffect(() => {
+    const handleGameAborted = () => {
+      setGameStarted(false);
+
+      setGameResult("❌ Game Aborted");
+
+      setEndgame({
+        type: "abort",
+        winner: null,
+      });
+
+      chessSounds.playGameEndSound();
+    };
+
+    socket.on("game-aborted", handleGameAborted);
+
+    return () => {
+      socket.off("game-aborted", handleGameAborted);
+    };
+  }, []);
+
+  /**
+   * TIMEOUT CONDITION
+   */
+
+  useEffect(() => {
+    const handleTimeout = ({ winner }) => {
+      setGameStarted(false);
+
+      if (winner === "w") {
+        setGameResult("🏆 White Wins on Time");
+        setEndgame({
+          type: "time",
+          winner: "w",
+        });
+      } else {
+        setGameResult("🏆 Black Wins on Time");
+        setEndgame({
+          type: "time",
+          winner: "b",
+        });
+      }
+
+      chessSounds.playGameEndSound();
+    };
+
+    socket.on("timeout", handleTimeout);
+
+    return () => {
+      socket.off("timeout", handleTimeout);
+    };
+  }, []);
+
+  /**
+   * DISCONNECT CONDITION
+   */
+
+  useEffect(() => {
+    const handlePlayerDisconnected = ({ winner }) => {
+      setGameStarted(false);
+
+      const winnerText = winner === "w" ? "White" : "Black";
+
+      setGameResult(`🏆 ${winnerText} Wins by Abandonment`);
+
+      setEndgame({
+        type: "abandonment",
+        winner,
+      });
+
+      chessSounds.playGameEndSound();
+    };
+
+    socket.on("player-disconnected", handlePlayerDisconnected);
+
+    return () => {
+      socket.off("player-disconnected", handlePlayerDisconnected);
+    };
+  }, []);
 
   const saveGameToDatabase = async (
     result,
@@ -312,32 +522,48 @@ const Play = () => {
   const handleGameAction = (actionType) => {
     if (isGameOver) return;
 
-    setGameStarted(false);
     if (actionType === "abort") {
+      if (gameMode === "multiplayer") {
+        const winner = multiplayerColor === "white" ? "b" : "w";
+        socket.emit("abort-game", {
+          roomId,
+          winner,
+        });
+        return;
+      }
+
       setGameResult("❌ Game Aborted");
       setEndgame({ type: "abort", winner: null });
-      if (gameMode === "multiplayer") {
-        socket.emit("game-over", { roomId });
-      }
     } else if (actionType === "resign") {
       const winner = game.turn() === "w" ? "Black" : "White";
       const winnerColor = game.turn() === "w" ? "b" : "w";
       setGameResult(`🏆 ${winner} Wins by Resignation`);
       setEndgame({ type: "resignation", winner: winnerColor });
+      setGameStarted(false);
       if (gameMode === "multiplayer") {
-        socket.emit("game-over", { roomId });
+        socket.emit("resign", {
+          roomId,
+        });
+        return;
       }
 
       const result = winnerColor === "w" ? "1-0" : "0-1";
       saveGameToDatabase(result, "resignation", whiteTime, blackTime);
     } else if (actionType === "draw") {
+      if (gameMode === "multiplayer") {
+        setDrawOfferPending(true);
+        socket.emit("draw-offer", {
+          roomId,
+        });
+        return;
+      }
+
       setGameResult("🤝 Draw by Mutual Agreement");
       setEndgame({ type: "draw", winner: null });
-      if (gameMode === "multiplayer") {
-        socket.emit("game-over", { roomId });
-      }
+
       saveGameToDatabase("1/2-1/2", "draw", whiteTime, blackTime);
     }
+
     chessSounds.playGameEndSound();
   };
 
@@ -400,11 +626,24 @@ const Play = () => {
             }
           />
 
-          {gameResult && (
-            <div className="bg-linear-to-r from-emerald-600 to-teal-500 text-white p-4 rounded-xl text-center text-lg font-bold shadow-xl border border-white/10">
-              {gameResult}
-            </div>
-          )}
+          {gameResult &&
+            (() => {
+              const { icon, bg, border, shadow } = getBannerConfig(gameResult);
+              const cleanText = gameResult.replace(/[🏆🤝❌]/g, "").trim();
+
+              return (
+                <div
+                  className={`flex items-center justify-center gap-3 p-4 rounded-xl text-lg font-bold text-white shadow-2xl ${bg} ${border} ${shadow} border backdrop-blur-sm transition-all duration-500 ease-out`}
+                >
+                  <div className="shrink-0 animate-[bounce_1s_ease-in-out_1]">
+                    {icon}
+                  </div>
+                  <span className="tracking-wide drop-shadow-sm">
+                    {cleanText}
+                  </span>
+                </div>
+              );
+            })()}
 
           <div className="my-1 bg-zinc-900 border border-white/10 p-3 rounded-2xl shadow-2xl">
             <ChessBoard
@@ -480,6 +719,10 @@ const Play = () => {
             gameMode={gameMode}
             setGameMode={setGameMode}
             openMultiplayerLobby={() => setShowMultiplayerLobby(true)}
+            incomingDrawOffer={incomingDrawOffer}
+            drawOfferPending={drawOfferPending}
+            acceptDrawOffer={acceptDrawOffer}
+            declineDrawOffer={declineDrawOffer}
           />
         </div>
       </div>
