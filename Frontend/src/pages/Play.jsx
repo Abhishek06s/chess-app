@@ -80,6 +80,7 @@ const Play = () => {
 
   const [roomId, setRoomId] = useState("");
   const [multiplayerColor, setMultiplayerColor] = useState(null);
+  const [pendingReconnect, setPendingReconnect] = useState(false);
 
   const [incomingDrawOffer, setIncomingDrawOffer] = useState(false);
   const [drawOfferPending, setDrawOfferPending] = useState(false);
@@ -90,6 +91,12 @@ const Play = () => {
   const [blackPlayerRating, setBlackPlayerRating] = useState(1200);
   const [whitePlayerId, setWhitePlayerId] = useState(null);
   const [blackPlayerId, setBlackPlayerId] = useState(null);
+
+  const [disconnectCountdown, setDisconnectCountdown] = useState(null);
+  const [disconnectedColor, setDisconnectedColor] = useState(null);
+  const [disconnectIsAbort, setDisconnectIsAbort] = useState(false);
+  const [whiteAbortCountdown, setWhiteAbortCountdown] = useState(null);
+  const [blackAbortCountdown, setBlackAbortCountdown] = useState(null);
 
   const [multiplayerWhiteTime, setMultiplayerWhiteTime] = useState(
     timeControl.base * 1000,
@@ -146,6 +153,48 @@ const Play = () => {
   const isGameOver =
     game.isGameOver() || whiteFlagged || blackFlagged || !!endgame.type;
 
+  const isMyTurn =
+    !isGameOver &&
+    gameStarted &&
+    (playerColor === "white" ? game.turn() === "w" : game.turn() === "b");
+
+  const isOpponentTurn =
+    !isGameOver &&
+    gameStarted &&
+    (playerColor === "white" ? game.turn() === "b" : game.turn() === "w");
+
+  const whiteAbortStatusText = whiteAbortCountdown
+    ? `Auto aborting in ${whiteAbortCountdown}s`
+    : undefined;
+
+  const blackAbortStatusText = blackAbortCountdown
+    ? `Auto aborting in ${blackAbortCountdown}s`
+    : undefined;
+
+  const myAbortStatusText =
+    playerColor === "white" ? whiteAbortStatusText : blackAbortStatusText;
+
+  const opponentAbortStatusText =
+    playerColor === "white" ? blackAbortStatusText : whiteAbortStatusText;
+
+  const myStatusText =
+    myAbortStatusText ||
+    (disconnectCountdown &&
+    disconnectedColor === (playerColor === "white" ? "w" : "b")
+      ? disconnectIsAbort
+        ? `Auto aborting in ${disconnectCountdown}s`
+        : `Auto resignation in ${disconnectCountdown}s`
+      : undefined);
+
+  const opponentStatusText =
+    opponentAbortStatusText ||
+    (disconnectCountdown &&
+    disconnectedColor === (playerColor === "white" ? "b" : "w")
+      ? disconnectIsAbort
+        ? `Auto aborting in ${disconnectCountdown}s`
+        : `Auto resignation in ${disconnectCountdown}s`
+      : undefined);
+
   useEffect(() => {
     const storedGuest = localStorage.getItem("guestUser");
     if (storedGuest) {
@@ -154,19 +203,37 @@ const Play = () => {
   }, []);
 
   useEffect(() => {
-    if (activeUser && gameMode === "bot") {
+    if (!gameStarted && activeUser) {
       const userRating =
         activeUser.stats?.[gameType]?.rating || activeUser.rating || 1200;
 
-      if (playerColor === "white") {
-        setWhitePlayerRating(userRating);
-        setBlackPlayerRating(1500);
-      } else {
-        setBlackPlayerRating(userRating);
-        setWhitePlayerRating(1500);
+      if (gameMode === "bot") {
+        if (playerColor === "white") {
+          setWhitePlayerRating(userRating);
+          setBlackPlayerRating(1500);
+        } else {
+          setBlackPlayerRating(userRating);
+          setWhitePlayerRating(1500);
+        }
+      } else if (gameMode === "multiplayer") {
+        if (playerColor === "white") {
+          setWhitePlayerRating(userRating);
+          setBlackPlayerRating(1200);
+        } else {
+          setBlackPlayerRating(userRating);
+          setWhitePlayerRating(1200);
+        }
       }
     }
-  }, [activeUser, gameMode, gameType, playerColor]);
+  }, [
+    activeUser,
+    activeUser?.rating,
+    activeUser?.stats?.[gameType]?.rating,
+    gameMode,
+    gameType,
+    playerColor,
+    gameStarted,
+  ]);
 
   /**
    * DRAW CONDITION
@@ -253,12 +320,161 @@ const Play = () => {
   }, []);
 
   /**
+   * DISCONNECT CONDITION
+   */
+
+  useEffect(() => {
+    const handleDisconnectCountdown = ({
+      disconnectedColor,
+      remainingSeconds,
+      isAbort,
+    }) => {
+      setDisconnectedColor(disconnectedColor);
+      setDisconnectCountdown(remainingSeconds);
+      setDisconnectIsAbort(isAbort);
+    };
+
+    socket.on("disconnect-countdown", handleDisconnectCountdown);
+
+    return () => {
+      socket.off("disconnect-countdown", handleDisconnectCountdown);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleAbortCountdown = ({ playerColor, remainingSeconds }) => {
+      if (playerColor === "w") {
+        setWhiteAbortCountdown(remainingSeconds);
+      }
+
+      if (playerColor === "b") {
+        setBlackAbortCountdown(remainingSeconds);
+      }
+    };
+
+    socket.on("abort-countdown", handleAbortCountdown);
+
+    return () => {
+      socket.off("abort-countdown", handleAbortCountdown);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handlePlayerReconnected = ({ playerColor }) => {
+      setDisconnectCountdown(null);
+      setDisconnectedColor(null);
+      setDisconnectIsAbort(false);
+    };
+
+    const handleRoomRestored = (roomState) => {
+      if (!roomState) return;
+
+      const restoredGame = new Chess(roomState.fen || new Chess().fen());
+      setGame(restoredGame);
+      setMoves(roomState.moves || []);
+      setMultiplayerWhiteTime(
+        roomState.whiteTimeRemaining ?? timeControl.base * 1000,
+      );
+      setMultiplayerBlackTime(
+        roomState.blackTimeRemaining ?? timeControl.base * 1000,
+      );
+      setTimeControl(roomState.timeControl || timeControl);
+      setWhitePlayerName(roomState.whiteName || whitePlayerName);
+      setBlackPlayerName(roomState.blackName || blackPlayerName);
+      setWhitePlayerRating(roomState.whiteRating || whitePlayerRating);
+      setBlackPlayerRating(roomState.blackRating || blackPlayerRating);
+      setGameMode("multiplayer");
+      setPendingReconnect(false);
+      setRoomId(roomState.roomId || roomId);
+      setGameStarted(!roomState.gameOver);
+
+      if (!roomState.gameOver) {
+        chessSounds.playGameStartSound();
+      }
+
+      if (roomState.gameOver) {
+        if (roomState.termination === "abandonment") {
+          const winnerText = roomState.winner === "w" ? "White" : "Black";
+          setGameResult(`🏆 ${winnerText} Wins by Abandonment`);
+          setEndgame({ type: "abandonment", winner: roomState.winner });
+        } else if (roomState.termination === "abort") {
+          setGameResult("❌ Game Aborted");
+          setEndgame({ type: "abort", winner: null });
+        }
+      }
+    };
+
+    const handleRestoreFailed = () => {
+      clearStoredMultiplayerSession();
+      setGameMode("bot");
+      setGameStarted(false);
+    };
+
+    socket.on("player-reconnected", handlePlayerReconnected);
+    socket.on("room-restored", handleRoomRestored);
+    socket.on("room-restore-failed", handleRestoreFailed);
+
+    return () => {
+      socket.off("player-reconnected", handlePlayerReconnected);
+      socket.off("room-restored", handleRoomRestored);
+      socket.off("room-restore-failed", handleRestoreFailed);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleClockUpdate = ({ whiteTimeRemaining, blackTimeRemaining }) => {
+      setMultiplayerWhiteTime(whiteTimeRemaining);
+      setMultiplayerBlackTime(blackTimeRemaining);
+    };
+
+    socket.on("clock-update", handleClockUpdate);
+
+    return () => {
+      socket.off("clock-update", handleClockUpdate);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handlePlayerAbandoned = ({ winner }) => {
+      setGameStarted(false);
+
+      const winnerText = winner === "w" ? "White" : "Black";
+      const result = winner === "w" ? "1-0" : "0-1";
+
+      setGameResult(`🏆 ${winnerText} Wins by Abandonment`);
+      setEndgame({ type: "abandonment", winner });
+      setDisconnectCountdown(null);
+      setDisconnectedColor(null);
+      setDisconnectIsAbort(false);
+      clearStoredMultiplayerSession();
+
+      chessSounds.playGameEndSound();
+      saveGameToDatabase(
+        result,
+        "abandonment",
+        multiplayerWhiteTime,
+        multiplayerBlackTime,
+        undefined,
+        undefined,
+        "abandoned",
+      );
+    };
+
+    socket.on("player-abandoned", handlePlayerAbandoned);
+
+    return () => {
+      socket.off("player-abandoned", handlePlayerAbandoned);
+    };
+  }, [multiplayerWhiteTime, multiplayerBlackTime]);
+
+  /**
    * ABORT CONDITION
    */
 
   useEffect(() => {
     const handleGameAborted = () => {
       setGameStarted(false);
+      clearStoredMultiplayerSession();
 
       setGameResult("❌ Game Aborted");
 
@@ -266,6 +482,12 @@ const Play = () => {
         type: "abort",
         winner: null,
       });
+
+      setDisconnectCountdown(null);
+      setDisconnectedColor(null);
+      setDisconnectIsAbort(false);
+      setWhiteAbortCountdown(null);
+      setBlackAbortCountdown(null);
 
       chessSounds.playGameEndSound();
     };
@@ -309,31 +531,24 @@ const Play = () => {
     };
   }, []);
 
-  /**
-   * DISCONNECT CONDITION
-   */
+  const clearStoredMultiplayerSession = () => {
+    localStorage.removeItem("multiplayerRoomId");
+    localStorage.removeItem("multiplayerColor");
+    setRoomId("");
+    setMultiplayerColor(null);
+    setPendingReconnect(false);
+  };
 
   useEffect(() => {
-    const handlePlayerDisconnected = ({ winner }) => {
-      setGameStarted(false);
+    const storedRoomId = localStorage.getItem("multiplayerRoomId");
+    const storedColor = localStorage.getItem("multiplayerColor");
 
-      const winnerText = winner === "w" ? "White" : "Black";
-
-      setGameResult(`🏆 ${winnerText} Wins by Abandonment`);
-
-      setEndgame({
-        type: "abandonment",
-        winner,
-      });
-
-      chessSounds.playGameEndSound();
-    };
-
-    socket.on("player-disconnected", handlePlayerDisconnected);
-
-    return () => {
-      socket.off("player-disconnected", handlePlayerDisconnected);
-    };
+    if (storedRoomId && storedColor) {
+      setRoomId(storedRoomId);
+      setMultiplayerColor(storedColor);
+      setPendingReconnect(true);
+      setGameMode("multiplayer");
+    }
   }, []);
 
   const saveGameToDatabase = async (
@@ -343,6 +558,7 @@ const Play = () => {
     finalBlackTime,
     overrideOpponentType,
     overrideOpponentName,
+    status = "completed",
   ) => {
     if (!user) return;
 
@@ -421,7 +637,7 @@ const Play = () => {
         opponentName: finalOpponentName,
         rated: true,
         termination,
-        status: "completed",
+        status,
       });
     } catch (error) {
       console.error(
@@ -574,6 +790,33 @@ const Play = () => {
     }
   }, [multiplayerColor]);
 
+  useEffect(() => {
+    const handleSocketConnect = () => {
+      if (!roomId || !multiplayerColor || !pendingReconnect) return;
+
+      socket.emit("reconnect-room", {
+        roomId,
+        playerColor: multiplayerColor,
+      });
+    };
+
+    socket.on("connect", handleSocketConnect);
+    if (socket.connected) {
+      handleSocketConnect();
+    }
+
+    return () => {
+      socket.off("connect", handleSocketConnect);
+    };
+  }, [roomId, multiplayerColor, pendingReconnect]);
+
+  useEffect(() => {
+    if (gameMode !== "multiplayer" || !roomId) return;
+
+    localStorage.setItem("multiplayerRoomId", roomId);
+    localStorage.setItem("multiplayerColor", multiplayerColor);
+  }, [roomId, multiplayerColor, gameMode]);
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">
@@ -600,9 +843,11 @@ const Play = () => {
           <PlayerCard
             name={
               gameMode === "multiplayer"
-                ? playerColor === "white"
-                  ? blackPlayerName
-                  : whitePlayerName
+                ? gameStarted
+                  ? playerColor === "white"
+                    ? blackPlayerName
+                    : whitePlayerName
+                  : "Searching for Opponent..."
                 : "Opponent (Bot)"
             }
             rating={
@@ -624,6 +869,7 @@ const Play = () => {
             advantage={
               playerColor === "white" ? blackAdvantage : whiteAdvantage
             }
+            statusText={opponentStatusText}
           />
 
           {gameResult &&
@@ -665,7 +911,7 @@ const Play = () => {
 
           <PlayerCard
             name={
-              gameMode === "multiplayer"
+              gameMode === "multiplayer" && gameStarted
                 ? playerColor === "white"
                   ? whitePlayerName
                   : blackPlayerName
@@ -674,7 +920,13 @@ const Play = () => {
                   : "You"
             }
             rating={
-              playerColor === "white" ? whitePlayerRating : blackPlayerRating
+              !gameStarted && activeUser
+                ? activeUser.stats?.[gameType]?.rating ||
+                  activeUser.rating ||
+                  1200
+                : playerColor === "white"
+                  ? whitePlayerRating
+                  : blackPlayerRating
             }
             isOnline={true}
             color={playerColor}
@@ -692,6 +944,7 @@ const Play = () => {
             advantage={
               playerColor === "white" ? whiteAdvantage : blackAdvantage
             }
+            statusText={myStatusText}
           />
         </div>
 
@@ -814,6 +1067,11 @@ const Play = () => {
               setGameMode("multiplayer");
               setGameStarted(true);
               setShowMultiplayerLobby(false);
+
+              chessSounds.playGameStartSound();
+
+              localStorage.setItem("multiplayerRoomId", roomId);
+              localStorage.setItem("multiplayerColor", color);
             }}
           />
         </div>

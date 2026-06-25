@@ -102,6 +102,7 @@ const gameSchema = new mongoose.Schema(
         "checkmate",
         "timeout",
         "resignation",
+        "abandonment",
         "draw",
         "stalemate",
         "insufficient-material",

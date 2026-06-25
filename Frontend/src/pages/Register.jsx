@@ -32,11 +32,11 @@ const Register = () => {
 
       const res = await registerUser(formData);
 
-      login(res.user);
+      await login(res.user);
 
       toast.success("Account created");
 
-      navigate("/");
+      navigate("/play");
     } catch (error) {
       toast.error(error?.response?.data?.message || "Registration failed");
     } finally {

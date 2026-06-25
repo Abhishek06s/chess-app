@@ -43,10 +43,22 @@ const ChessBoard = ({
       const gameCopy = new Chess(game.fen());
 
       try {
+        const fromPiece = gameCopy.get(move.from);
+        if (!fromPiece) {
+          console.warn(
+            "Ignored invalid opponent move: source square empty",
+            move,
+          );
+          return;
+        }
+
         const capturedPiece = gameCopy.get(move.to);
         const result = gameCopy.move(move);
 
-        if (!result) return;
+        if (!result) {
+          console.warn("Ignored invalid opponent move:", move);
+          return;
+        }
 
         setMoves((prev) => [...prev, result.san]);
         setLastMove({ from: move.from, to: move.to });
@@ -71,7 +83,7 @@ const ChessBoard = ({
 
         setGame(gameCopy);
       } catch (err) {
-        console.error("Invalid dynamic opponent move execution blocked:", err);
+        console.warn("Ignored invalid opponent move:", move, err);
       }
     };
 

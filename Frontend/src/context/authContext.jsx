@@ -22,8 +22,13 @@ export const AuthProvider = ({ children }) => {
     fetchUser();
   }, []);
 
-  const login = (userData) => {
-    setUser(userData);
+  const login = async (userData) => {
+    try {
+    const res = await getProfile();
+    setUser(res.user);
+  } catch (err) {
+    console.error("Failed to fetch full profile details on login:", err);
+  }
   };
 
   const logout = async (logoutApiCall) => {

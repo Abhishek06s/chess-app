@@ -9,6 +9,7 @@ const PlayerCard = ({
   isActive,
   capturedPieces,
   advantage,
+  statusText,
 }) => {
   const formatTime = (ms = 0) => {
     if (typeof ms !== "number" || Number.isNaN(ms)) {
@@ -114,6 +115,9 @@ const PlayerCard = ({
             </span>
           )}
         </div>
+        {statusText && (
+          <p className="text-xs text-amber-300 mt-2">{statusText}</p>
+        )}
       </div>
 
       <div className="flex items-center gap-4">

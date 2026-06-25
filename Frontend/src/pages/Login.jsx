@@ -31,11 +31,11 @@ const Login = () => {
 
       const res = await loginUser(formData);
 
-      login(res.user);
+      await login(res.user);
 
       toast.success("Login successful");
 
-      navigate("/");
+      navigate("/play");
     } catch (error) {
       toast.error(error?.response?.data?.message || "Login failed");
     } finally {
