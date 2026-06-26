@@ -10,6 +10,7 @@ const PlayerCard = ({
   capturedPieces,
   advantage,
   statusText,
+  ratingChange = null,
 }) => {
   const formatTime = (ms = 0) => {
     if (typeof ms !== "number" || Number.isNaN(ms)) {
@@ -85,7 +86,18 @@ const PlayerCard = ({
           <h2>{name}</h2>
         </div>
 
-        <p className="text-zinc-400 text-sm">Rating: {rating}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-zinc-400 text-sm">Rating: {rating}</p>
+          {ratingChange !== null && ratingChange !== 0 && (
+            <span
+              className={`text-xs font-bold ${
+                ratingChange > 0 ? "text-emerald-400" : "text-rose-400"
+              }`}
+            >
+              {ratingChange > 0 ? `+${ratingChange}` : ratingChange}
+            </span>
+          )}
+        </div>
 
         <div className="flex items-center gap-1 h-6">
           {capturedPieces.map(({ piece, count }) => (

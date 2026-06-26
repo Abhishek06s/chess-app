@@ -1,6 +1,8 @@
 import { Chess } from "chess.js";
 import { useEffect, useRef, useState } from "react";
 import {
+  Star,
+  Circle,
   ZoomIn,
   Flag,
   HelpCircle,
@@ -65,6 +67,8 @@ const GameSidebar = ({
   drawOfferPending,
   acceptDrawOffer,
   declineDrawOffer,
+  isRated,
+  setIsRated,
 }) => {
   const navigate = useNavigate();
   const [showShareMenu, setShowShareMenu] = useState(false);
@@ -237,6 +241,34 @@ const GameSidebar = ({
                 <span className="text-gray-800 font-semibold">Multiplayer</span>
               </button>
             </div>
+
+            {/* Rated / Unrated Toggle */}
+            {gameMode === "multiplayer" && (
+              <div className="flex items-center justify-between bg-zinc-950/50 border border-white/5 rounded-xl px-4 py-3">
+                <span className="text-xs font-semibold text-zinc-400">
+                  Game Type
+                </span>
+                <button
+                  onClick={() => setIsRated((prev) => !prev)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                    isRated
+                      ? "bg-amber-500/10 border-amber-500/40 text-amber-400"
+                      : "bg-zinc-800 border-white/10 text-zinc-400"
+                  }`}
+                >
+                  {isRated ? (
+                    <>
+                      <Star size={14} fill="currentColor" /> Rated
+                    </>
+                  ) : (
+                    <>
+                      <Circle size={14} /> Unrated
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
+
             <div className="flex items-center gap-3 w-full">
               <button
                 onClick={handleNewGame}
@@ -429,13 +461,41 @@ const GameSidebar = ({
         <div className="bg-zinc-950/40 border border-white/10 rounded-xl p-3 space-y-3 shadow-md">
           <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold text-zinc-500 tracking-wide uppercase border-b border-white/5">
             <span>Live Pool Tier</span>
-            <span className="text-purple-400 font-mono tracking-normal bg-zinc-800/80 px-2 py-0.5 rounded border border-white/5 text-[11px] uppercase font-bold">
-              {currentCategoryPool} ({currentFormatLabel})
-            </span>
+            <div className="flex items-center gap-2">
+              {gameMode === "multiplayer" && (
+                <span
+                  className={`text-[12px] font-bold px-2 py-0.5 rounded border w-25 mr-10 ${
+                    isRated
+                      ? "text-amber-400 bg-amber-500/10 border-amber-500/30"
+                      : "text-zinc-400 bg-zinc-800/80 border-white/10"
+                  }`}
+                >
+                  {isRated ? (
+                    <div className="flex gap-2">
+                      <div>
+                        <Star size={14} fill="currentColor" />{" "}
+                      </div>
+                      <div>Rated</div>
+                    </div>
+                  ) : (
+                    <div className="flex gap-2">
+                      <div>
+                        <Circle size={14} />
+                      </div>
+                      <div>Unrated</div>
+                    </div>
+                  )}
+                </span>
+              )}
+              <span className="text-purple-400 font-mono tracking-normal bg-zinc-800/80 px-2 py-0.5 rounded border border-white/5 text-[11px] uppercase font-bold">
+                {currentCategoryPool} ({currentFormatLabel})
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-3 gap-2">
-            {moves.length < 2 ? (
+            {/* Abort — multiplayer only, before move 2 */}
+            {gameMode === "multiplayer" && moves.length < 2 ? (
               <button
                 onClick={() => onGameAction("abort")}
                 className="flex flex-col items-center gap-1 py-3 px-2 bg-zinc-800 hover:bg-zinc-750 transition border border-white/10 rounded-xl text-xs font-semibold text-zinc-300 shadow-sm cursor-pointer"
@@ -450,23 +510,37 @@ const GameSidebar = ({
               </div>
             )}
 
-            <button
-              onClick={() => onGameAction("draw")}
-              className="flex flex-col items-center gap-1 py-3 px-2 bg-zinc-800 hover:bg-zinc-750 transition border border-white/10 rounded-xl text-xs font-semibold text-zinc-300 shadow-sm cursor-pointer"
-              title="Offer Draw"
-            >
-              <HelpCircle size={16} className="text-sky-400" />
-              <span>Offer Draw</span>
-            </button>
+            {/* Draw — multiplayer only */}
+            {gameMode === "multiplayer" ? (
+              <button
+                onClick={() => onGameAction("draw")}
+                className="flex flex-col items-center gap-1 py-3 px-2 bg-zinc-800 hover:bg-zinc-750 transition border border-white/10 rounded-xl text-xs font-semibold text-zinc-300 shadow-sm cursor-pointer"
+                title="Offer Draw"
+              >
+                <HelpCircle size={16} className="text-sky-400" />
+                <span>Offer Draw</span>
+              </button>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-3 px-2 bg-zinc-900/40 border border-white/5 rounded-xl text-xs text-zinc-600 font-medium select-none">
+                <span>No Draw</span>
+              </div>
+            )}
 
-            <button
-              onClick={() => onGameAction("resign")}
-              className="flex flex-col items-center gap-1 py-3 px-2 bg-rose-950/40 hover:bg-rose-900/40 transition border border-rose-500/20 rounded-xl text-xs font-semibold text-rose-400 shadow-sm cursor-pointer"
-              title="Resign Match"
-            >
-              <Flag size={16} className="text-rose-500" />
-              <span>Resign</span>
-            </button>
+            {gameMode === "multiplayer" && moves.length < 2 ? (
+              <div className="flex flex-col items-center justify-center py-3 px-2 bg-zinc-900/40 border border-white/5 rounded-xl text-xs text-zinc-600 font-medium select-none">
+                <Flag size={16} className="text-zinc-700 mb-1" />
+                <span>Resign</span>
+              </div>
+            ) : (
+              <button
+                onClick={() => onGameAction("resign")}
+                className="flex flex-col items-center gap-1 py-3 px-2 bg-rose-950/40 hover:bg-rose-900/40 transition border border-rose-500/20 rounded-xl text-xs font-semibold text-rose-400 shadow-sm cursor-pointer"
+                title="Resign Match"
+              >
+                <Flag size={16} className="text-rose-500" />
+                <span>Resign</span>
+              </button>
+            )}
           </div>
 
           {/* Incoming Draw Offer Alert Box */}

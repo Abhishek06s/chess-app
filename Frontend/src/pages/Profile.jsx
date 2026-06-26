@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { getProfile, getUserByUsername } from "../services/user.service";
 import { getMyGames } from "../services/game.service";
 import {
@@ -13,18 +13,30 @@ import {
   ChevronUp,
   Sword,
   Calendar,
+  ExternalLink,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 
 const formatGameDate = (dateString) => {
   if (!dateString) return "";
+
   const date = new Date(dateString);
+
+  if (isNaN(date.getTime())) {
+    console.warn("Invalid date provided:", dateString);
+    return "Invalid date";
+  }
+
   const now = new Date();
   const diffInMs = now - date;
-  const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
 
-  if (diffInHours < 1) return "Just now";
+  const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+  const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+  const diffInDays = Math.floor(diffInHours / 24);
+
+  if (diffInMinutes < 1) return "Just now";
+  if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
   if (diffInHours < 24) return `${diffInHours}h ago`;
+  if (diffInDays < 7) return `${diffInDays}d ago`;
 
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 };
@@ -96,7 +108,9 @@ const Profile = () => {
         } else {
           profileData = await getProfile();
 
-          const gameData = await getMyGames();
+          const gameData = username
+            ? await getGamesByUsername(username)
+            : await getMyGames();
           setGames(gameData.games);
         }
 
@@ -151,7 +165,7 @@ const Profile = () => {
               <div className="space-y-1 md:-mb-1">
                 <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-linear-to-r from-white to-zinc-400">
                   {user.username}
-                  {(isPublicProfile && username !== user.username) && (
+                  {isPublicProfile && username !== user.username && (
                     <span className="text-sm bg-zinc-900 px-2 py-1 ml-5 rounded-md text-zinc-300/60">
                       Public Profile
                     </span>
@@ -227,25 +241,22 @@ const Profile = () => {
       </div>
 
       <div className="w-full max-w-4xl">
-        <div className="bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl transition-all duration-300">
+        <div className="bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl">
           <button
             onClick={() => setShowGames(!showGames)}
-            className="w-full flex items-center justify-between p-6 cursor-pointer hover:bg-zinc-800/30 transition-colors duration-200 group"
+            className="w-full flex items-center justify-between p-6 cursor-pointer hover:bg-zinc-800/30 transition-all duration-200"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-zinc-800 rounded-xl group-hover:bg-zinc-700/60 transition-colors">
-                <Sword className="w-5 h-5 text-zinc-400 group-hover:text-indigo-400 transition-colors" />
+              <div className="p-2 bg-zinc-800 rounded-xl">
+                <Sword className="w-5 h-5 text-indigo-400" />
               </div>
-              <h2 className="text-xl font-bold text-zinc-100 tracking-tight">
-                Game History
-              </h2>
+              <h2 className="text-xl font-bold text-zinc-100">Game History</h2>
             </div>
-
-            <div className="p-1.5 rounded-full bg-zinc-800/50 group-hover:bg-zinc-800 transition-colors">
+            <div className="p-1.5 rounded-full bg-zinc-800/50">
               {showGames ? (
-                <ChevronUp className="w-5 h-5 text-zinc-400" />
+                <ChevronUp className="w-5 h-5" />
               ) : (
-                <ChevronDown className="w-5 h-5 text-zinc-400" />
+                <ChevronDown className="w-5 h-5" />
               )}
             </div>
           </button>
@@ -253,7 +264,7 @@ const Profile = () => {
           {showGames && (
             <div className="border-t border-zinc-800 bg-zinc-950/20">
               {games.length === 0 ? (
-                <div className="p-12 text-center text-zinc-500 text-sm">
+                <div className="p-12 text-center text-zinc-500">
                   No games played yet.
                 </div>
               ) : (
@@ -261,58 +272,61 @@ const Profile = () => {
                   {games.slice(0, visibleGames).map((game) => {
                     const resultInfo = getResultDetails(game, user._id);
 
+                    const borderColors = {
+                      Victory: "border-l-emerald-500",
+                      Defeat: "border-l-rose-500",
+                      Draw: "border-l-zinc-500",
+                    };
+
                     return (
                       <div
                         key={game._id}
-                        className="p-5 hover:bg-zinc-900/30 transition-colors duration-150"
+                        className={`group p-5 border-l-4 transition-all duration-200 hover:bg-zinc-900/50 ${borderColors[resultInfo.text] || "border-l-transparent"}`}
                       >
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                          <div className="space-y-1.5">
-                            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-3">
                               <span
-                                className={`px-2.5 py-0.5 text-xs font-semibold rounded-md border ${resultInfo.bg}`}
+                                className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded ${resultInfo.bg.replace("/10", "")} bg-opacity-10`}
                               >
                                 {resultInfo.text}
                               </span>
-                              <span className="text-sm font-medium text-zinc-300">
-                                vs {game.opponentName || "Bot"}
+
+                              {/* Clickable Username */}
+                              <div className="flex items-center gap-1 text-zinc-300 font-medium">
+                                <span>vs</span>
+                                {game.opponentName ? (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigate(`/profile/${game.opponentName}`);
+                                    }}
+                                    className="hover:text-indigo-400 hover:underline transition-all flex items-center gap-1 ml-4"
+                                  >
+                                    {game.opponentName}
+                                    <ExternalLink className="w-3 h-3 opacity-50" />
+                                  </button>
+                                ) : (
+                                  <span className="italic text-zinc-600">
+                                    Bot
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-3 text-sm text-zinc-400 ml-1">
+                              <span className="bg-zinc-800 px-2 py-0.5 rounded text-xs font-mono">
+                                {game.opening?.eco || "???"}
                               </span>
-                              {game.createdAt && (
-                                <>
-                                  <span className="text-zinc-700 text-xs hidden sm:inline">
-                                    •
-                                  </span>
-                                  <span className="text-sm text-zinc-300 flex items-center gap-1">
-                                    <Calendar className="w-3 h-3" />
-                                    {formatGameDate(game.createdAt)}
-                                  </span>
-                                </>
-                              )}
+                              <span className="font-medium text-zinc-300">
+                                {game.opening?.name || "Custom Game"}
+                              </span>
                             </div>
 
-                            <div className="flex items-center gap-2 px-1 flex-wrap">
-                              {game.opening?.eco && (
-                                <span className="px-2 py-0.5 text-xs font-semibold rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                  {game.opening.eco}
-                                </span>
-                              )}
-
-                              <p className="text-sm text-zinc-300 font-medium">
-                                {game.opening?.name || "Unknown Opening"}
-                              </p>
-                            </div>
-
-                            <div className="flex items-center gap-2 text-sm text-zinc-300/70 font-medium px-2">
+                            <div className="flex items-center gap-2 text-xs text-zinc-400 ml-2">
                               <span>{formatTimeControl(game.timeControl)}</span>
                               <span>•</span>
-                              <span className="capitalize">
-                                {game.gameType}
-                              </span>
-                              <span>•</span>
-                              <span className="text-zinc-400/90">
-                                {terminationLabels[game.termination] ||
-                                  game.termination}
-                              </span>
+                              <span>{formatGameDate(game.createdAt)}</span>
                             </div>
                           </div>
 
@@ -322,24 +336,15 @@ const Profile = () => {
                                 state: { pgn: game.pgn },
                               })
                             }
-                            className="sm:w-auto w-full px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:scale-98 text-white font-medium rounded-xl text-sm transition-all duration-150 shadow-md shadow-indigo-600/10 cursor-pointer text-center block whitespace-nowrap"
+                            className="px-4 py-2 bg-zinc-800 hover:bg-indigo-600 hover:text-white transition-colors text-zinc-300 font-medium rounded-xl text-sm"
                           >
-                            Review Game
+                            Review
                           </button>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              )}
-
-              {visibleGames < games.length && (
-                <button
-                  onClick={() => setVisibleGames((prev) => prev + 10)}
-                  className="w-full p-4 text-sm font-medium text-indigo-400 bg-zinc-900/10 hover:bg-zinc-800/40 transition-colors duration-200 border-t border-zinc-800/60 cursor-pointer text-center block"
-                >
-                  Load More Games
-                </button>
               )}
             </div>
           )}
