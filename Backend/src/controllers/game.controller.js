@@ -26,29 +26,42 @@ const createGame = async (req, res) => {
       status,
     } = req.body;
 
-    
-    if (!timeControl || typeof timeControl.base !== "number") {
+    if (!timeControl || typeof timeControl.base !== "number")
       return res
-      .status(400)
-      .json({ success: false, message: "Invalid time control" });
-    }
-    
+        .status(400)
+        .json({ success: false, message: "Invalid time control" });
+
     const validGameTypes = ["bullet", "blitz", "rapid"];
-    if (!validGameTypes.includes(gameType)) {
+    if (!validGameTypes.includes(gameType))
       return res
-      .status(400)
-      .json({ success: false, message: "Invalid game type" });
-    }
-    
-    if (termination === "abort") {
-      return res.status(400).json({
-        success: false,
-        message: "Aborted games are not stored",
-      });
-    }
+        .status(400)
+        .json({ success: false, message: "Invalid game type" });
+
+    if (termination === "abort")
+      return res
+        .status(400)
+        .json({ success: false, message: "Aborted games are not stored" });
 
     const finalWhitePlayer = whitePlayer || req.user._id;
     const finalBlackPlayer = blackPlayer || req.user._id;
+
+    // ── Deduplication guard ───────────────────────────────────────────────────
+    // Prevents double-saves when both clients submit the same multiplayer game.
+    if (opponentType === "human") {
+      const thirtySecondsAgo = new Date(Date.now() - 30000);
+      const duplicate = await Game.findOne({
+        whitePlayer: finalWhitePlayer,
+        blackPlayer: finalBlackPlayer,
+        gameType,
+        result,
+        termination,
+        createdAt: { $gte: thirtySecondsAgo },
+      });
+      if (duplicate)
+        return res
+          .status(200)
+          .json({ success: true, game: duplicate, deduplicated: true });
+    }
 
     const game = await Game.create({
       whitePlayer: finalWhitePlayer,
@@ -64,71 +77,79 @@ const createGame = async (req, res) => {
       blackTimeRemaining,
       opponentType,
       opponentName,
-      rated,
+      rated: opponentType === "bot" ? false : !!rated, // bot games are always unrated
       termination,
       status,
     });
 
+    // ── Bot game: save record only, do NOT touch stats ────────────────────────
+    if (opponentType === "bot") {
+      return res.status(201).json({ success: true, game });
+    }
+
+    // ── Human (multiplayer) game: update stats + ratings ──────────────────────
     const whiteUser = await User.findById(finalWhitePlayer);
     const blackUser = await User.findById(finalBlackPlayer);
 
-    if (!whiteUser || !blackUser) {
-      return res.status(404).json({
-        success: false,
-        message: "Player account profile not found",
-      });
-    }
+    if (!whiteUser || !blackUser)
+      return res
+        .status(404)
+        .json({ success: false, message: "Player account not found" });
 
-    /**
-     * SELF-PLAY HANDLING (White ID matches Black ID)
-     */
-    if (whiteUser._id.toString() === blackUser._id.toString()) {
-      const userStats = whiteUser.stats[gameType];
-      userStats.gamesPlayed += 1;
+    const isSelfPlay = whiteUser._id.toString() === blackUser._id.toString();
 
-      if (result === "1-0") {
-        userStats.wins += 1;
-      } else if (result === "0-1") {
-        userStats.losses += 1;
-      } else {
-        userStats.draws += 1;
-      }
-
+    if (isSelfPlay) {
+      // Self-play (edge case) — count stats once, no rating change
+      const s = whiteUser.stats[gameType];
+      s.gamesPlayed += 1;
+      if (result === "1-0") s.wins += 1;
+      else if (result === "0-1") s.losses += 1;
+      else s.draws += 1;
       await whiteUser.save();
     } else {
-      /**
-       * MULTIPLAYER HANDLING (Different Player IDs)
-       */
-      const whiteStats = whiteUser.stats[gameType];
-      const blackStats = blackUser.stats[gameType];
+      const ws = whiteUser.stats[gameType];
+      const bs = blackUser.stats[gameType];
 
-      whiteStats.gamesPlayed += 1;
-      blackStats.gamesPlayed += 1;
+      ws.gamesPlayed += 1;
+      bs.gamesPlayed += 1;
 
       if (result === "1-0") {
-        whiteStats.wins += 1;
-        blackStats.losses += 1;
+        ws.wins += 1;
+        bs.losses += 1;
       } else if (result === "0-1") {
-        blackStats.wins += 1;
-        whiteStats.losses += 1;
+        bs.wins += 1;
+        ws.losses += 1;
       } else {
-        whiteStats.draws += 1;
-        blackStats.draws += 1;
+        ws.draws += 1;
+        bs.draws += 1;
+      }
+
+      // ── Elo update (rated games only) ─────────────────────────────────────
+      if (rated) {
+        const whiteScore = result === "1-0" ? 1 : result === "0-1" ? 0 : 0.5;
+        const blackScore = 1 - whiteScore;
+
+        ws.rating = calculateNewRating(
+          ws.rating,
+          bs.rating,
+          whiteScore,
+          ws.gamesPlayed,
+        );
+        bs.rating = calculateNewRating(
+          bs.rating,
+          ws.rating,
+          blackScore,
+          bs.gamesPlayed,
+        );
       }
 
       await whiteUser.save();
       await blackUser.save();
     }
 
-    res.status(201).json({
-      success: true,
-      game,
-    });
+    res.status(201).json({ success: true, game });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -227,9 +248,37 @@ const deleteGame = async (req, res) => {
   }
 };
 
+/**
+ * Get Games By User ID
+ */
+const getGamesByUserId = async (req, res) => {
+  try {
+    const { userId } = req.params;
+  
+    const games = await Game.find({
+      $or: [{ whitePlayer: userId }, { blackPlayer: userId }],
+    })
+      .populate("whitePlayer", "username stats")
+      .populate("blackPlayer", "username stats")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: games.length,
+      games,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   createGame,
   getMyGames,
   getGameById,
   deleteGame,
+  getGamesByUserId,
 };

@@ -534,9 +534,12 @@ const initializeSocket = (server) => {
 
     // ── reconnect-by-session: cross-device path (JWT session) ───────────────
 
-    socket.on("reconnect-by-session", () => {
+    socket.on("reconnect-by-session", (callback) => {
       const userId = getUserIdFromSocket(socket);
       if (!userId) {
+        if (typeof callback === "function") {
+          return callback({ status: "not-found" });
+        }
         socket.emit("session-game-not-found");
         return;
       }
@@ -562,10 +565,13 @@ const initializeSocket = (server) => {
           clearCleanupTimeout(room);
         }
 
-        socket.emit(
-          "session-game-found",
-          buildRoomState(roomId, room, normalizedColor),
-        );
+        const roomState = buildRoomState(roomId, room, normalizedColor);
+
+        if (typeof callback === "function") {
+          callback({ status: "found", roomState });
+        } else {
+          socket.emit("session-game-found", roomState);
+        }
 
         if (!room.gameOver) {
           io.to(roomId).emit("player-reconnected", {
@@ -575,7 +581,11 @@ const initializeSocket = (server) => {
         return;
       }
 
-      socket.emit("session-game-not-found");
+      if (typeof callback === "function") {
+        callback({ status: "not-found" });
+      } else {
+        socket.emit("session-game-not-found");
+      }
     });
 
     socket.on("game-over", ({ roomId }) => {

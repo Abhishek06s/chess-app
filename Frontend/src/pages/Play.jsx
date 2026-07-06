@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Chess } from "chess.js";
 import { Trophy, Scale, XCircle } from "lucide-react";
 
@@ -82,6 +82,8 @@ const Play = () => {
   const [multiplayerColor, setMultiplayerColor] = useState(null);
   const [pendingReconnect, setPendingReconnect] = useState(false);
   const [pendingSessionReconnect, setPendingSessionReconnect] = useState(false);
+  const sessionReconnectRetryRef = useRef(false);
+  const [hasSessionRestorePending, setHasSessionRestorePending] = useState(false);
 
   const [incomingDrawOffer, setIncomingDrawOffer] = useState(false);
   const [drawOfferPending, setDrawOfferPending] = useState(false);
@@ -98,6 +100,8 @@ const Play = () => {
   const [disconnectIsAbort, setDisconnectIsAbort] = useState(false);
   const [whiteAbortCountdown, setWhiteAbortCountdown] = useState(null);
   const [blackAbortCountdown, setBlackAbortCountdown] = useState(null);
+
+  const [isRated, setIsRated] = useState("false");
 
   const [multiplayerWhiteTime, setMultiplayerWhiteTime] = useState(
     timeControl.base * 1000,
@@ -251,6 +255,12 @@ const Play = () => {
       setGameResult("🤝 Draw by Mutual Agreement");
       setEndgame({ type: "draw", winner: null });
       chessSounds.playGameEndSound();
+      saveGameToDatabase(
+        "1/2-1/2",
+        "draw",
+        multiplayerWhiteTime,
+        multiplayerBlackTime,
+      );
     };
     const handleDrawDeclined = () => {
       setIncomingDrawOffer(false);
@@ -285,6 +295,13 @@ const Play = () => {
         winner: winner === "white" ? "w" : "b",
       });
       chessSounds.playGameEndSound();
+      const result = winner === "white" ? "1-0" : "0-1";
+      saveGameToDatabase(
+        result,
+        "resignation",
+        multiplayerWhiteTime,
+        multiplayerBlackTime,
+      );
     };
     socket.on("player-resigned", handlePlayerResigned);
     return () => socket.off("player-resigned", handlePlayerResigned);
@@ -364,6 +381,36 @@ const Play = () => {
     }
   };
 
+  const attemptRestoreSessionGame = async () => {
+    if (!user || !socket) return false;
+
+    if (!socket.connected) {
+      socket.connect();
+    }
+
+    const result = await new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        resolve({ status: "not-found" });
+      }, 5000);
+
+      socket.emit("reconnect-by-session", (response) => {
+        clearTimeout(timeout);
+        resolve(response || { status: "not-found" });
+      });
+    });
+
+    if (result.status === "found" && result.roomState) {
+      applyRoomState(result.roomState);
+      setPendingSessionReconnect(false);
+      setPendingReconnect(false);
+      setHasSessionRestorePending(false);
+      sessionReconnectRetryRef.current = false;
+      return true;
+    }
+
+    return false;
+  };
+
   // ── RECONNECT: player-reconnected / room-restored / room-restore-failed ────
 
   useEffect(() => {
@@ -377,6 +424,7 @@ const Play = () => {
       applyRoomState(roomState);
       setPendingReconnect(false);
       setPendingSessionReconnect(false);
+      setHasSessionRestorePending(false);
     };
 
     const handleRestoreFailed = () => {
@@ -396,14 +444,23 @@ const Play = () => {
   // ── RECONNECT: session-game-found / session-game-not-found ─────────────────
 
   useEffect(() => {
-    const handleSessionGameFound = (roomState) => {
+      const handleSessionGameFound = (roomState) => {
+      sessionReconnectRetryRef.current = false;
       applyRoomState(roomState);
       setPendingSessionReconnect(false);
       setPendingReconnect(false);
+      setHasSessionRestorePending(false);
     };
 
     const handleSessionGameNotFound = () => {
+      if (pendingSessionReconnect && !sessionReconnectRetryRef.current) {
+        sessionReconnectRetryRef.current = true;
+        socket.disconnect();
+        socket.connect();
+        return;
+      }
       setPendingSessionReconnect(false);
+      setHasSessionRestorePending(false);
       // No active game on the server — stay on the lobby/bot screen as normal
     };
 
@@ -481,9 +538,11 @@ const Play = () => {
       if (winner === "w") {
         setGameResult("🏆 White Wins on Time");
         setEndgame({ type: "time", winner: "w" });
+        saveGameToDatabase("1-0", "timeout", multiplayerWhiteTime, 0);
       } else {
         setGameResult("🏆 Black Wins on Time");
         setEndgame({ type: "time", winner: "b" });
+        saveGameToDatabase("0-1", "timeout", 0, multiplayerBlackTime);
       }
       chessSounds.playGameEndSound();
     };
@@ -535,14 +594,6 @@ const Play = () => {
     }
   }, []);
 
-  // ── RECONNECT INIT: trigger session reconnect once auth resolves ────────────
-
-  useEffect(() => {
-    if (!authLoading && user) {
-      setPendingSessionReconnect(true);
-    }
-  }, [authLoading, user]);
-
   // ── RECONNECT FIRE: localStorage path (same device, guests + logged-in) ────
 
   useEffect(() => {
@@ -569,6 +620,12 @@ const Play = () => {
     if (socket.connected) handleSocketConnect();
     return () => socket.off("connect", handleSocketConnect);
   }, [pendingSessionReconnect, pendingReconnect]);
+
+  useEffect(() => {
+    if (!authLoading && user) {
+      setPendingSessionReconnect(true);
+    }
+  }, [authLoading, user]);
 
   // ── Keep localStorage in sync while a multiplayer game is live ─────────────
 
@@ -608,8 +665,13 @@ const Play = () => {
     overrideOpponentType,
     overrideOpponentName,
     status = "completed",
+    rated,
   ) => {
     if (!user) return;
+
+    const isMultiplayer = gameMode === "multiplayer";
+    if (isMultiplayer && playerColor !== "white") return;
+
     try {
       const cleanGameInstance = new Chess();
       const fenHistory = [cleanGameInstance.fen()];
@@ -678,7 +740,7 @@ const Play = () => {
         blackTimeRemaining: Math.max(0, Math.round(finalBlackTime / 1000)),
         opponentType: finalOpponentType,
         opponentName: finalOpponentName,
-        rated: true,
+        rated: isMultiplayer && rated,
         termination,
         status,
       });
@@ -694,6 +756,7 @@ const Play = () => {
 
   useEffect(() => {
     if (endgame.type) return;
+    if (gameMode === "multiplayer") return;
 
     if (whiteFlagged) {
       setGameResult("🏆 Black Wins on Time");
@@ -965,6 +1028,7 @@ const Play = () => {
             isLoggedIn={isLoggedIn}
             activeUser={activeUser}
             onAuthRequired={() => setShowAuthModal(true)}
+            onNewGameRequest={attemptRestoreSessionGame}
             timeControl={timeControl}
             setTimeControl={setTimeControl}
             onGameAction={handleGameAction}
@@ -976,6 +1040,8 @@ const Play = () => {
             drawOfferPending={drawOfferPending}
             acceptDrawOffer={acceptDrawOffer}
             declineDrawOffer={declineDrawOffer}
+            isRated={isRated}
+            setIsRated={setIsRated}
           />
         </div>
       </div>

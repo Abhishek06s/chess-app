@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getProfile, getUserByUsername } from "../services/user.service";
-import { getMyGames } from "../services/game.service";
+import { getMyGames, getGamesByUserId } from "../services/game.service";
 import {
   Trophy,
   Swords,
@@ -93,7 +93,6 @@ const Profile = () => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState("rapid");
-
   const [games, setGames] = useState([]);
   const [showGames, setShowGames] = useState(false);
   const [visibleGames, setVisibleGames] = useState(10);
@@ -102,19 +101,23 @@ const Profile = () => {
     const fetchProfile = async () => {
       try {
         let profileData;
+        let gameData;
 
         if (username) {
           profileData = await getUserByUsername(username);
+          if (profileData?.user) {
+            gameData = await getGamesByUserId(profileData.user._id);
+            setGames(gameData.games || []);
+          }
         } else {
           profileData = await getProfile();
-
-          const gameData = username
-            ? await getGamesByUsername(username)
-            : await getMyGames();
-          setGames(gameData.games);
+          gameData = await getMyGames();
+          setGames(gameData.games || []);
         }
 
-        setUser(profileData.user);
+        if (profileData?.user) {
+          setUser(profileData.user);
+        }
       } catch (error) {
         console.error(error);
       } finally {

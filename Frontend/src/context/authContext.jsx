@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { getProfile } from "../services/user.service";
+import { socket } from "../services/socket.service";
 
 const AuthContext = createContext();
 
@@ -24,11 +25,13 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (userData) => {
     try {
-    const res = await getProfile();
-    setUser(res.user);
-  } catch (err) {
-    console.error("Failed to fetch full profile details on login:", err);
-  }
+      const res = await getProfile();
+      setUser(res.user);
+      socket.disconnect();
+      socket.connect();
+    } catch (err) {
+      console.error("Failed to fetch full profile details on login:", err);
+    }
   };
 
   const logout = async (logoutApiCall) => {

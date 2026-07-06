@@ -56,6 +56,7 @@ const GameSidebar = ({
   isLoggedIn,
   activeUser,
   onAuthRequired,
+  onNewGameRequest,
   timeControl,
   setTimeControl,
   onGameAction,
@@ -138,10 +139,17 @@ const GameSidebar = ({
     }
   }
 
-  const handleNewGame = () => {
+  const handleNewGame = async () => {
     if (!isLoggedIn && !activeUser?.isGuest) {
       onAuthRequired();
       return;
+    }
+
+    if (onNewGameRequest && isLoggedIn) {
+      const restored = await onNewGameRequest();
+      if (restored) {
+        return;
+      }
     }
 
     if (gameMode === "multiplayer") {
