@@ -14,6 +14,9 @@ import {
   Sword,
   Calendar,
   ExternalLink,
+  Clock,
+  ArrowUpRight,
+  ShieldAlert,
 } from "lucide-react";
 
 const formatGameDate = (dateString) => {
@@ -244,18 +247,25 @@ const Profile = () => {
       </div>
 
       <div className="w-full max-w-4xl">
-        <div className="bg-zinc-900/80 backdrop-blur-sm border border-zinc-800 rounded-3xl overflow-hidden shadow-2xl">
+        <div className="bg-zinc-900/60 backdrop-blur-md border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl">
           <button
             onClick={() => setShowGames(!showGames)}
-            className="w-full flex items-center justify-between p-6 cursor-pointer hover:bg-zinc-800/30 transition-all duration-200"
+            className="w-full flex items-center justify-between p-6 cursor-pointer hover:bg-zinc-800/20 transition-all duration-200"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-zinc-800 rounded-xl">
+              <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl">
                 <Sword className="w-5 h-5 text-indigo-400" />
               </div>
-              <h2 className="text-xl font-bold text-zinc-100">Game History</h2>
+              <div className="text-left">
+                <h2 className="text-xl font-bold text-zinc-100">
+                  Game History
+                </h2>
+                <p className="text-xs text-zinc-400 font-medium">
+                  Recent matches and analytical breakdown
+                </p>
+              </div>
             </div>
-            <div className="p-1.5 rounded-full bg-zinc-800/50">
+            <div className="p-2 rounded-xl bg-zinc-800/60 border border-zinc-700/40 text-zinc-400">
               {showGames ? (
                 <ChevronUp className="w-5 h-5" />
               ) : (
@@ -265,70 +275,104 @@ const Profile = () => {
           </button>
 
           {showGames && (
-            <div className="border-t border-zinc-800 bg-zinc-950/20">
+            <div className="border-t border-zinc-800/80 bg-zinc-950/40">
               {games.length === 0 ? (
-                <div className="p-12 text-center text-zinc-500">
-                  No games played yet.
+                <div className="p-16 text-center text-zinc-500 flex flex-col items-center gap-3">
+                  <Swords className="w-10 h-10 opacity-30 text-zinc-400" />
+                  <p className="font-medium">No recorded games found.</p>
                 </div>
               ) : (
-                <div className="divide-y divide-zinc-800/40">
+                <div className="p-4 md:p-6 space-y-3">
                   {games.slice(0, visibleGames).map((game) => {
                     const resultInfo = getResultDetails(game, user._id);
-
-                    const borderColors = {
-                      Victory: "border-l-emerald-500",
-                      Defeat: "border-l-rose-500",
-                      Draw: "border-l-zinc-500",
-                    };
+                    const termination =
+                      terminationLabels[game.termination] || game.termination;
 
                     return (
                       <div
                         key={game._id}
-                        className={`group p-5 border-l-4 transition-all duration-200 hover:bg-zinc-900/50 ${borderColors[resultInfo.text] || "border-l-transparent"}`}
+                        className={`group relative overflow-hidden bg-zinc-900/40 border border-zinc-800/70 ${resultInfo.glow} hover:bg-zinc-800/40 rounded-2xl transition-all duration-200 p-4 md:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4`}
                       >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                          <div className="space-y-2">
-                            <div className="flex flex-wrap items-center gap-3">
+                        {/* Side Accent Bar */}
+                        <div
+                          className={`absolute left-0 top-0 bottom-0 w-1 ${resultInfo.bar}`}
+                        />
+
+                        {/* Left Side: Game Metadata & Opponent */}
+                        <div className="flex items-start md:items-center gap-4 pl-2">
+                          {/* Color Piece Indicator */}
+                          <div
+                            className={`p-3 rounded-xl border flex items-center justify-center font-bold text-lg ${
+                              resultInfo.isWhite
+                                ? "bg-zinc-100 text-zinc-900 border-white shadow-md"
+                                : "bg-zinc-900 text-zinc-300 border-zinc-700 shadow-inner"
+                            }`}
+                            title={
+                              resultInfo.isWhite
+                                ? "Played as White"
+                                : "Played as Black"
+                            }
+                          >
+                            {resultInfo.isWhite ? "♔" : "♚"}
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-2.5">
+                              {/* Outcome Badge */}
                               <span
-                                className={`text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded ${resultInfo.bg.replace("/10", "")} bg-opacity-10`}
+                                className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md border ${resultInfo.bg}`}
                               >
                                 {resultInfo.text}
                               </span>
 
-                              {/* Clickable Username */}
-                              <div className="flex items-center gap-1 text-zinc-300 font-medium">
-                                <span>vs</span>
-                                {game.opponentName ? (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      navigate(`/profile/${game.opponentName}`);
-                                    }}
-                                    className="hover:text-indigo-400 hover:underline transition-all flex items-center gap-1 ml-4"
-                                  >
-                                    {game.opponentName}
-                                    <ExternalLink className="w-3 h-3 opacity-50" />
-                                  </button>
-                                ) : (
-                                  <span className="italic text-zinc-600">
-                                    Bot
-                                  </span>
-                                )}
-                              </div>
+                              {/* Opponent Info */}
+                              <span className="text-zinc-400 text-sm font-medium">
+                                vs
+                              </span>
+                              {game.opponentName ? (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/profile/${game.opponentName}`);
+                                  }}
+                                  className="text-white font-semibold text-base hover:text-indigo-400 hover:underline transition-all flex items-center gap-1"
+                                >
+                                  {game.opponentName}
+                                  <ExternalLink className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 transition-opacity" />
+                                </button>
+                              ) : (
+                                <span className="italic text-zinc-500 font-medium">
+                                  Engine Bot
+                                </span>
+                              )}
                             </div>
 
-                            <div className="flex items-center gap-3 text-sm text-zinc-400 ml-1">
-                              <span className="bg-zinc-800 px-2 py-0.5 rounded text-xs font-mono">
-                                {game.opening?.eco || "???"}
+                            {/* Opening Details & Termination */}
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+                              <span className="bg-zinc-800/80 border border-zinc-700/50 px-2 py-0.5 rounded font-mono font-medium text-indigo-300">
+                                {game.opening?.eco || "ECO"}
                               </span>
-                              <span className="font-medium text-zinc-300">
-                                {game.opening?.name || "Custom Game"}
+                              <span className="font-medium text-zinc-300 truncate max-w-[200px] sm:max-w-[300px]">
+                                {game.opening?.name || "Custom Match"}
                               </span>
+                              {termination && (
+                                <span className="text-zinc-500 hidden sm:inline">
+                                  • {termination}
+                                </span>
+                              )}
                             </div>
+                          </div>
+                        </div>
 
-                            <div className="flex items-center gap-2 text-xs text-zinc-400 ml-2">
+                        {/* Right Side: Timing Info & Action */}
+                        <div className="flex items-center justify-between md:justify-end w-full md:w-auto gap-4 pt-3 md:pt-0 border-t md:border-t-0 border-zinc-800/50 pl-2 md:pl-0">
+                          <div className="flex md:flex-col items-center md:items-end justify-between md:justify-center text-xs text-zinc-400 gap-2 md:gap-1">
+                            <div className="flex items-center gap-1.5 font-medium text-zinc-300 bg-zinc-800/40 px-2.5 py-1 rounded-lg border border-zinc-800">
+                              <Clock className="w-3.5 h-3.5 text-indigo-400" />
                               <span>{formatTimeControl(game.timeControl)}</span>
-                              <span>•</span>
+                            </div>
+                            <div className="flex items-center gap-1 text-zinc-500">
+                              <Calendar className="w-3 h-3" />
                               <span>{formatGameDate(game.createdAt)}</span>
                             </div>
                           </div>
@@ -339,14 +383,28 @@ const Profile = () => {
                                 state: { pgn: game.pgn },
                               })
                             }
-                            className="px-4 py-2 bg-zinc-800 hover:bg-indigo-600 hover:text-white transition-colors text-zinc-300 font-medium rounded-xl text-sm"
+                            className="px-4 py-2 bg-indigo-600/10 hover:bg-indigo-600 border border-indigo-500/30 hover:border-indigo-600 text-indigo-300 hover:text-white font-medium rounded-xl text-xs transition-all duration-200 flex items-center gap-1.5 shadow-sm group/btn cursor-pointer"
                           >
-                            Review
+                            <span>Review</span>
+                            <ArrowUpRight className="w-3.5 h-3.5 group-hover/btn:translate-x-0.5 group-hover/btn:-translate-y-0.5 transition-transform" />
                           </button>
                         </div>
                       </div>
                     );
                   })}
+
+                  {/* Load More Trigger */}
+                  {visibleGames < games.length && (
+                    <div className="pt-4 text-center">
+                      <button
+                        onClick={() => setVisibleGames((prev) => prev + 10)}
+                        className="px-6 py-2.5 bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white font-medium text-xs rounded-xl transition-all duration-200 cursor-pointer shadow-md"
+                      >
+                        Load More Games ({games.length - visibleGames}{" "}
+                        remaining)
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

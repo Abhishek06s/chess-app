@@ -337,6 +337,21 @@ const Play = () => {
   const applyRoomState = (roomState) => {
     if (!roomState) return;
 
+    // Clear previous game's UI state
+    setGameResult("");
+    setEndgame({ type: null, winner: null });
+
+    setIncomingDrawOffer(false);
+    setDrawOfferPending(false);
+
+    setDisconnectCountdown(null);
+    setDisconnectedColor(null);
+    setDisconnectIsAbort(false);
+
+    setWhiteAbortCountdown(null);
+    setBlackAbortCountdown(null);
+    setLastMove(null);
+
     const restoredGame = new Chess(roomState.fen || new Chess().fen());
     setGame(restoredGame);
     setBoardKey((prev) => prev + 1);
