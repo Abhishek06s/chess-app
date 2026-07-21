@@ -119,6 +119,26 @@ const Play = () => {
 
   const gameType = calculateGameType(timeControl.base, timeControl.increment);
 
+  const latestGameStateRef = useRef({});
+  useEffect(() => {
+    latestGameStateRef.current = {
+      game,
+      moves,
+      gameMode,
+      playerColor,
+      multiplayerWhiteTime,
+      multiplayerBlackTime,
+      user,
+      roomId,
+      whitePlayerId,
+      blackPlayerId,
+      whitePlayerName,
+      blackPlayerName,
+      timeControl,
+      gameType,
+    };
+  });
+
   const { whiteTime, blackTime, resetClock } = useChessClock(
     game,
     moves,
@@ -255,12 +275,10 @@ const Play = () => {
       setGameResult("🤝 Draw by Mutual Agreement");
       setEndgame({ type: "draw", winner: null });
       chessSounds.playGameEndSound();
-      saveGameToDatabase(
-        "1/2-1/2",
-        "draw",
-        multiplayerWhiteTime,
-        multiplayerBlackTime,
-      );
+      clearStoredMultiplayerSession();
+      const { multiplayerWhiteTime: wt, multiplayerBlackTime: bt } =
+        latestGameStateRef.current;
+      saveGameToDatabase("1/2-1/2", "draw", wt, bt);
     };
     const handleDrawDeclined = () => {
       setIncomingDrawOffer(false);
@@ -295,13 +313,11 @@ const Play = () => {
         winner: winner === "white" ? "w" : "b",
       });
       chessSounds.playGameEndSound();
+      clearStoredMultiplayerSession();
       const result = winner === "white" ? "1-0" : "0-1";
-      saveGameToDatabase(
-        result,
-        "resignation",
-        multiplayerWhiteTime,
-        multiplayerBlackTime,
-      );
+      const { multiplayerWhiteTime: wt, multiplayerBlackTime: bt } =
+        latestGameStateRef.current;
+      saveGameToDatabase(result, "resignation", wt, bt);
     };
     socket.on("player-resigned", handlePlayerResigned);
     return () => socket.off("player-resigned", handlePlayerResigned);
@@ -367,6 +383,8 @@ const Play = () => {
     setBlackPlayerName(roomState.blackName || "Black");
     setWhitePlayerRating(roomState.whiteRating || 1200);
     setBlackPlayerRating(roomState.blackRating || 1200);
+    setWhitePlayerId(roomState.whitePlayerId || null);
+    setBlackPlayerId(roomState.blackPlayerId || null);
     setGameMode("multiplayer");
     setRoomId(roomState.roomId || "");
     setGameStarted(!roomState.gameOver);
@@ -512,11 +530,13 @@ const Play = () => {
       setDisconnectIsAbort(false);
       clearStoredMultiplayerSession();
       chessSounds.playGameEndSound();
+      const { multiplayerWhiteTime: wt, multiplayerBlackTime: bt } =
+        latestGameStateRef.current;
       saveGameToDatabase(
         result,
         "abandonment",
-        multiplayerWhiteTime,
-        multiplayerBlackTime,
+        wt,
+        bt,
         undefined,
         undefined,
         "abandoned",
@@ -550,14 +570,18 @@ const Play = () => {
   useEffect(() => {
     const handleTimeout = ({ winner }) => {
       setGameStarted(false);
+      const { multiplayerWhiteTime: wt, multiplayerBlackTime: bt } =
+        latestGameStateRef.current;
       if (winner === "w") {
         setGameResult("🏆 White Wins on Time");
         setEndgame({ type: "time", winner: "w" });
-        saveGameToDatabase("1-0", "timeout", multiplayerWhiteTime, 0);
+        clearStoredMultiplayerSession();
+        saveGameToDatabase("1-0", "timeout", wt, 0);
       } else {
         setGameResult("🏆 Black Wins on Time");
         setEndgame({ type: "time", winner: "b" });
-        saveGameToDatabase("0-1", "timeout", 0, multiplayerBlackTime);
+        clearStoredMultiplayerSession();
+        saveGameToDatabase("0-1", "timeout", 0, bt);
       }
       chessSounds.playGameEndSound();
     };
@@ -681,16 +705,38 @@ const Play = () => {
     overrideOpponentName,
     status = "completed",
     rated,
+    finalPgnOverride = null,
+    finalMovesOverride = null,
+    finalFenOverride = null,
   ) => {
-    if (!user) return;
+    const {
+      game: currentGame,
+      moves: currentMoves,
+      gameMode: currentGameMode,
+      playerColor: currentPlayerColor,
+      user: currentUser,
+      roomId: currentRoomId,
+      whitePlayerId: currentWhitePlayerId,
+      blackPlayerId: currentBlackPlayerId,
+      whitePlayerName: currentWhitePlayerName,
+      blackPlayerName: currentBlackPlayerName,
+      timeControl: currentTimeControl,
+      gameType: currentGameType,
+    } = latestGameStateRef.current;
 
-    const isMultiplayer = gameMode === "multiplayer";
-    if (isMultiplayer && playerColor !== "white") return;
+    if (!currentUser) return;
+
+    const isMultiplayer = currentGameMode === "multiplayer";
+
+    // Only white client should persist multiplayer games to avoid duplicates
+    if (isMultiplayer && currentPlayerColor !== "white") return;
 
     try {
+      const finalMovesArray =
+        finalMovesOverride || currentMoves || currentGame.history();
       const cleanGameInstance = new Chess();
       const fenHistory = [cleanGameInstance.fen()];
-      moves.forEach((move) => {
+      finalMovesArray.forEach((move) => {
         try {
           cleanGameInstance.move(move);
           fenHistory.push(cleanGameInstance.fen());
@@ -699,9 +745,8 @@ const Play = () => {
         }
       });
 
-      const finalPgn = cleanGameInstance.pgn();
-      const finalFen = cleanGameInstance.fen();
-      const finalMovesArray = cleanGameInstance.history();
+      const finalPgn = finalPgnOverride || cleanGameInstance.pgn();
+      const finalFen = finalFenOverride || cleanGameInstance.fen();
 
       let openingData = { name: "Custom Variation / Open Game", eco: "A00" };
       for (let i = fenHistory.length - 1; i >= 0; i--) {
@@ -726,31 +771,30 @@ const Play = () => {
         }
       }
 
-      const currentUserId = user._id || user.id;
-      const isMultiplayer = gameMode === "multiplayer";
+      const currentUserId = currentUser._id || currentUser.id;
       const finalOpponentType =
         overrideOpponentType || (isMultiplayer ? "human" : "bot");
       const finalOpponentName =
         overrideOpponentName ||
         (isMultiplayer
-          ? playerColor === "white"
-            ? blackPlayerName
-            : whitePlayerName
+          ? currentPlayerColor === "white"
+            ? currentBlackPlayerName
+            : currentWhitePlayerName
           : "Stockfish Bot");
 
       await createGame({
-        whitePlayer: isMultiplayer ? whitePlayerId : currentUserId,
-        blackPlayer: isMultiplayer ? blackPlayerId : currentUserId,
+        whitePlayer: isMultiplayer ? currentWhitePlayerId : currentUserId,
+        blackPlayer: isMultiplayer ? currentBlackPlayerId : currentUserId,
         pgn: finalPgn,
         fen: finalFen,
         moves: finalMovesArray,
         result,
         opening: openingData,
         timeControl: {
-          base: timeControl.base,
-          increment: timeControl.increment,
+          base: currentTimeControl.base,
+          increment: currentTimeControl.increment,
         },
-        gameType,
+        gameType: currentGameType,
         whiteTimeRemaining: Math.max(0, Math.round(finalWhiteTime / 1000)),
         blackTimeRemaining: Math.max(0, Math.round(finalBlackTime / 1000)),
         opponentType: finalOpponentType,
@@ -758,6 +802,7 @@ const Play = () => {
         rated: isMultiplayer && rated,
         termination,
         status,
+        roomId: isMultiplayer ? currentRoomId : undefined,
       });
     } catch (error) {
       console.error(
@@ -893,6 +938,96 @@ const Play = () => {
 
   // ── Auth loading gate ──────────────────────────────────────────────────────
 
+  const handleLocalGameOver = ({ termination, winner, pgn, moves, fen }) => {
+    if (gameMode !== "multiplayer") return;
+    setGameStarted(false);
+
+    if (termination === "checkmate") {
+      const winnerName = winner === "w" ? "White" : "Black";
+      setGameResult(`🏆 ${winnerName} Wins by Checkmate`);
+      setEndgame({ type: "checkmate", winner });
+    } else if (termination === "stalemate") {
+      setGameResult("🤝 Draw by Stalemate");
+      setEndgame({ type: "stalemate", winner: null });
+    } else if (termination === "insufficient-material") {
+      setGameResult("🤝 Draw by Insufficient Material");
+      setEndgame({ type: "insufficient-material", winner: null });
+    } else if (termination === "threefold-repetition") {
+      setGameResult("🤝 Draw by Repetition");
+      setEndgame({ type: "threefold-repetition", winner: null });
+    } else {
+      setGameResult("🤝 Draw");
+      setEndgame({ type: "draw", winner: null });
+    }
+
+    chessSounds.playGameEndSound();
+    clearStoredMultiplayerSession();
+    // Inform server and other client about the game end (server will broadcast)
+    socket.emit("game-ended", { roomId, termination, winner, pgn, moves, fen });
+  };
+
+  // ── SERVER-BROADCASTED GAME END ─────────────────────────────────────────
+  useEffect(() => {
+    const handleGameEnded = ({ termination, winner, pgn, moves, fen }) => {
+      setGameStarted(false);
+      if (termination === "checkmate") {
+        const winnerName = winner === "w" ? "White" : "Black";
+        setGameResult(`🏆 ${winnerName} Wins by Checkmate`);
+        setEndgame({ type: "checkmate", winner });
+      } else if (termination === "stalemate") {
+        setGameResult("🤝 Draw by Stalemate");
+        setEndgame({ type: "stalemate", winner: null });
+      } else if (termination === "insufficient-material") {
+        setGameResult("🤝 Draw by Insufficient Material");
+        setEndgame({ type: "insufficient-material", winner: null });
+      } else if (termination === "threefold-repetition") {
+        setGameResult("🤝 Draw by Repetition");
+        setEndgame({ type: "threefold-repetition", winner: null });
+      } else if (termination === "abandonment") {
+        const winnerText = winner === "w" ? "White" : "Black";
+        setGameResult(`🏆 ${winnerText} Wins by Abandonment`);
+        setEndgame({ type: "abandonment", winner });
+      } else if (termination === "resignation") {
+        const winnerText = winner === "w" ? "White" : "Black";
+        setGameResult(`🏆 ${winnerText} Wins by Resignation`);
+        setEndgame({ type: "resignation", winner });
+      } else if (termination === "timeout") {
+        const winnerText = winner === "w" ? "White" : "Black";
+        setGameResult(`🏆 ${winnerText} Wins on Time`);
+        setEndgame({ type: "time", winner });
+      } else if (termination === "abort") {
+        setGameResult("❌ Game Aborted");
+        setEndgame({ type: "abort", winner: null });
+      } else {
+        setGameResult("🤝 Draw");
+        setEndgame({ type: "draw", winner: null });
+      }
+
+      clearStoredMultiplayerSession();
+      chessSounds.playGameEndSound();
+
+      const result = winner === "w" ? "1-0" : winner === "b" ? "0-1" : "1/2-1/2";
+      const { multiplayerWhiteTime: wt, multiplayerBlackTime: bt } =
+        latestGameStateRef.current;
+      saveGameToDatabase(
+        result,
+        termination,
+        wt,
+        bt,
+        undefined,
+        undefined,
+        "completed",
+        undefined,
+        pgn || null,
+        moves || null,
+        fen || null,
+      );
+    };
+
+    socket.on("game-ended", handleGameEnded);
+    return () => socket.off("game-ended", handleGameEnded);
+  }, [multiplayerWhiteTime, multiplayerBlackTime, playerColor, chessSounds]);
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-400">
@@ -973,6 +1108,7 @@ const Play = () => {
               key={boardKey}
               game={game}
               setGame={setGame}
+              moves={moves}
               setMoves={setMoves}
               boardOrientation={boardOrientation}
               addCapturedPiece={addCapturedPiece}
@@ -984,6 +1120,7 @@ const Play = () => {
               multiplayerColor={multiplayerColor}
               setMultiplayerWhiteTime={setMultiplayerWhiteTime}
               setMultiplayerBlackTime={setMultiplayerBlackTime}
+              onLocalGameOver={handleLocalGameOver}
             />
           </div>
 

@@ -24,6 +24,7 @@ const createGame = async (req, res) => {
       rated,
       termination,
       status,
+      roomId,
     } = req.body;
 
     if (!timeControl || typeof timeControl.base !== "number")
@@ -45,42 +46,66 @@ const createGame = async (req, res) => {
     const finalWhitePlayer = whitePlayer || req.user._id;
     const finalBlackPlayer = blackPlayer || req.user._id;
 
-    // ── Deduplication guard ───────────────────────────────────────────────────
-    // Prevents double-saves when both clients submit the same multiplayer game.
+    const finalPlayer1 = opponentType === "human" ? finalWhitePlayer : undefined;
+    const finalPlayer2 = opponentType === "human" ? finalBlackPlayer : undefined;
+
     if (opponentType === "human") {
-      const thirtySecondsAgo = new Date(Date.now() - 30000);
-      const duplicate = await Game.findOne({
-        whitePlayer: finalWhitePlayer,
-        blackPlayer: finalBlackPlayer,
-        gameType,
-        result,
-        termination,
-        createdAt: { $gte: thirtySecondsAgo },
-      });
-      if (duplicate)
-        return res
-          .status(200)
-          .json({ success: true, game: duplicate, deduplicated: true });
+      if (roomId) {
+        const duplicateByRoom = await Game.findOne({ roomId });
+        if (duplicateByRoom)
+          return res
+            .status(200)
+            .json({ success: true, game: duplicateByRoom, deduplicated: true });
+      } else {
+        const thirtySecondsAgo = new Date(Date.now() - 30000);
+        const duplicate = await Game.findOne({
+          whitePlayer: finalWhitePlayer,
+          blackPlayer: finalBlackPlayer,
+          gameType,
+          result,
+          termination,
+          createdAt: { $gte: thirtySecondsAgo },
+        });
+        if (duplicate)
+          return res
+            .status(200)
+            .json({ success: true, game: duplicate, deduplicated: true });
+      }
     }
 
-    const game = await Game.create({
-      whitePlayer: finalWhitePlayer,
-      blackPlayer: finalBlackPlayer,
-      pgn,
-      fen,
-      moves,
-      result,
-      opening,
-      timeControl,
-      gameType,
-      whiteTimeRemaining,
-      blackTimeRemaining,
-      opponentType,
-      opponentName,
-      rated: opponentType === "bot" ? false : !!rated, // bot games are always unrated
-      termination,
-      status,
-    });
+    let game;
+    try {
+      game = await Game.create({
+        whitePlayer: finalWhitePlayer,
+        blackPlayer: finalBlackPlayer,
+        player1: finalPlayer1,
+        player2: finalPlayer2,
+        roomId: opponentType === "human" ? roomId || null : null,
+        pgn,
+        fen,
+        moves,
+        result,
+        opening,
+        timeControl,
+        gameType,
+        whiteTimeRemaining,
+        blackTimeRemaining,
+        opponentType,
+        opponentName,
+        rated: opponentType === "bot" ? false : !!rated, // bot games are always unrated
+        termination,
+        status,
+      });
+    } catch (error) {
+      if (error.code === 11000 && roomId) {
+        const existing = await Game.findOne({ roomId });
+        if (existing)
+          return res
+            .status(200)
+            .json({ success: true, game: existing, deduplicated: true });
+      }
+      throw error;
+    }
 
     // ── Bot game: save record only, do NOT touch stats ────────────────────────
     if (opponentType === "bot") {
@@ -164,6 +189,8 @@ const getMyGames = async (req, res) => {
     })
       .populate("whitePlayer", "username stats")
       .populate("blackPlayer", "username stats")
+      .populate("player1", "username stats")
+      .populate("player2", "username stats")
       .sort({ createdAt: -1 });
 
     res.status(200).json({
@@ -187,7 +214,9 @@ const getGameById = async (req, res) => {
   try {
     const game = await Game.findById(req.params.id)
       .populate("whitePlayer", "username stats")
-      .populate("blackPlayer", "username stats");
+      .populate("blackPlayer", "username stats")
+      .populate("player1", "username stats")
+      .populate("player2", "username stats");
 
     if (!game) {
       return res.status(404).json({
@@ -260,6 +289,8 @@ const getGamesByUserId = async (req, res) => {
     })
       .populate("whitePlayer", "username stats")
       .populate("blackPlayer", "username stats")
+      .populate("player1", "username stats")
+      .populate("player2", "username stats")
       .sort({ createdAt: -1 });
 
     res.status(200).json({

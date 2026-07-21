@@ -184,9 +184,9 @@ const GameSidebar = ({
   }
 
   return (
-    <div className="flex flex-col h-full justify-between">
+    <div className="flex flex-col h-full justify-between overflow-hidden">
       {/* Top Section */}
-      <div>
+      <div className="shrink-0">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-semibold tracking-wide text-zinc-400">
             Match Setup

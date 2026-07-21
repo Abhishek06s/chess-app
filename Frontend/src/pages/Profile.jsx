@@ -61,6 +61,9 @@ const getResultDetails = (game, userId) => {
     return {
       text: "Draw",
       bg: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
+      bar: "bg-zinc-500/60",
+      glow: "",
+      isWhite,
     };
   }
 
@@ -71,11 +74,39 @@ const getResultDetails = (game, userId) => {
     ? {
         text: "Victory",
         bg: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+        bar: "bg-emerald-500/60",
+        glow: "",
+        isWhite,
       }
     : {
         text: "Defeat",
         bg: "bg-rose-500/10 text-rose-400 border-rose-500/20",
+        bar: "bg-rose-500/60",
+        glow: "",
+        isWhite,
       };
+};
+
+const getOpponent = (game, userId) => {
+  if (game.opponentType === "bot") {
+    return { username: game.opponentName || "Stockfish Bot", isBot: true };
+  }
+
+  const matchesUser = (player) =>
+    player && (player._id === userId || player === userId);
+
+  if (game.player1 && game.player2) {
+    return matchesUser(game.player1) ? game.player2 : game.player1;
+  }
+
+  // Legacy fallback for games saved before player1/player2 existed
+  if (game.whitePlayer && game.blackPlayer) {
+    return matchesUser(game.whitePlayer) ? game.blackPlayer : game.whitePlayer;
+  }
+
+  return game.opponentName
+    ? { username: game.opponentName, isBot: false }
+    : null;
 };
 
 const terminationLabels = {
@@ -285,6 +316,7 @@ const Profile = () => {
                 <div className="p-4 md:p-6 space-y-3">
                   {games.slice(0, visibleGames).map((game) => {
                     const resultInfo = getResultDetails(game, user._id);
+                    const opponent = getOpponent(game, user._id);
                     const termination =
                       terminationLabels[game.termination] || game.termination;
 
@@ -329,20 +361,20 @@ const Profile = () => {
                               <span className="text-zinc-400 text-sm font-medium">
                                 vs
                               </span>
-                              {game.opponentName ? (
+                              {opponent && !opponent.isBot ? (
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    navigate(`/profile/${game.opponentName}`);
+                                    navigate(`/profile/${opponent.username}`);
                                   }}
                                   className="text-white font-semibold text-base hover:text-indigo-400 hover:underline transition-all flex items-center gap-1"
                                 >
-                                  {game.opponentName}
+                                  {opponent.username}
                                   <ExternalLink className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 transition-opacity" />
                                 </button>
                               ) : (
                                 <span className="italic text-zinc-500 font-medium">
-                                  Engine Bot
+                                  {opponent?.username || "Engine Bot"}
                                 </span>
                               )}
                             </div>

@@ -8,6 +8,7 @@ import { Crown, Flag, Timer } from "lucide-react";
 const ChessBoard = ({
   game,
   setGame,
+  moves,
   setMoves,
   boardOrientation,
   addCapturedPiece,
@@ -19,6 +20,7 @@ const ChessBoard = ({
   multiplayerColor,
   setMultiplayerWhiteTime,
   setMultiplayerBlackTime,
+  onLocalGameOver,
 }) => {
   const {
     playMoveSound,
@@ -69,6 +71,32 @@ const ChessBoard = ({
 
         if (gameCopy.isGameOver()) {
           playGameEndSound();
+          if (typeof onLocalGameOver === "function") {
+            let termination = "draw";
+            if (gameCopy.isCheckmate()) termination = "checkmate";
+            else if (gameCopy.isStalemate()) termination = "stalemate";
+            else if (gameCopy.isInsufficientMaterial())
+              termination = "insufficient-material";
+            else if (gameCopy.isThreefoldRepetition())
+              termination = "threefold-repetition";
+
+            const winner = gameCopy.isCheckmate()
+              ? gameCopy.turn() === "w"
+                ? "b"
+                : "w"
+              : null;
+
+            const finalMoves = [...moves, result.san];
+            const finalFen = gameCopy.fen();
+
+            onLocalGameOver({
+              termination,
+              winner,
+              pgn: null,
+              moves: finalMoves,
+              fen: finalFen,
+            });
+          }
         } else if (gameCopy.isCheck()) {
           playCheckSound();
         } else if (result.captured) {
@@ -94,6 +122,7 @@ const ChessBoard = ({
     };
   }, [
     game,
+    moves,
     gameMode,
     setGame,
     setMoves,
@@ -129,6 +158,26 @@ const ChessBoard = ({
 
         if (gameCopy.isGameOver()) {
           playGameEndSound();
+          if (typeof onLocalGameOver === "function") {
+            let termination = "draw";
+            if (gameCopy.isCheckmate()) termination = "checkmate";
+            else if (gameCopy.isStalemate()) termination = "stalemate";
+            else if (gameCopy.isInsufficientMaterial())
+              termination = "insufficient-material";
+            else if (gameCopy.isThreefoldRepetition())
+              termination = "threefold-repetition";
+
+            const winner = gameCopy.isCheckmate()
+              ? gameCopy.turn() === "w"
+                ? "b"
+                : "w"
+              : null;
+
+            const finalMoves = [...moves, result.san];
+            const finalFen = gameCopy.fen();
+
+            onLocalGameOver({ termination, winner, pgn: null, moves: finalMoves, fen: finalFen });
+          }
         } else if (gameCopy.isCheck()) {
           playCheckSound();
         } else if (result.captured) {

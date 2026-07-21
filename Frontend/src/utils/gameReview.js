@@ -142,6 +142,24 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
 
     const engineAfter = await getAnalysis(fenAfter, 14, analyzePosition);
 
+    if (isBookMove) {
+      const getNumericEval = (e) => {
+        if (typeof e === "string") {
+          if (e.startsWith("M") && !e.startsWith("M-")) return 1000;
+          if (e.startsWith("-M") || e.startsWith("M-")) return -1000;
+        }
+        return Number(e);
+      };
+
+      const bVal = getNumericEval(engineBefore.evaluation);
+      const aVal = getNumericEval(engineAfter.evaluation);
+      const evalLoss = side === "white" ? bVal - aVal : aVal - bVal;
+
+      if (evalLoss > 1.0) {
+        isBookMove = false;
+      }
+    }
+
     const calculatedPlayerMove = `${move.from}${move.to}${move.promotion || ""}`
       .toLowerCase()
       .trim();

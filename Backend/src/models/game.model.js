@@ -18,6 +18,27 @@ const gameSchema = new mongoose.Schema(
       },
     },
 
+    player1: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: function () {
+        return this.opponentType === "human";
+      },
+    },
+
+    player2: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: function () {
+        return this.opponentType === "human";
+      },
+    },
+
+    roomId: {
+      type: String,
+      default: null,
+    },
+
     pgn: {
       type: String,
       required: true,
@@ -120,6 +141,11 @@ const gameSchema = new mongoose.Schema(
   {
     timestamps: true,
   },
+);
+
+gameSchema.index(
+  { roomId: 1 },
+  { unique: true, partialFilterExpression: { roomId: { $type: "string" } } },
 );
 
 module.exports = mongoose.model("Game", gameSchema);

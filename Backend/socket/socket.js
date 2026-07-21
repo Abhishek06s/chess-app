@@ -206,6 +206,8 @@ const initializeSocket = (server) => {
         whiteTime = Math.max(0, room.whiteTimeRemaining - elapsed);
         if (whiteTime === 0) {
           room.gameOver = true;
+          room.termination = "timeout";
+          room.winner = "b";
           io.to(roomId).emit("timeout", { winner: "b" });
           room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
         }
@@ -213,6 +215,8 @@ const initializeSocket = (server) => {
         blackTime = Math.max(0, room.blackTimeRemaining - elapsed);
         if (blackTime === 0) {
           room.gameOver = true;
+          room.termination = "timeout";
+          room.winner = "w";
           io.to(roomId).emit("timeout", { winner: "w" });
           room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
         }
@@ -298,6 +302,8 @@ const initializeSocket = (server) => {
         roomId,
         white: room.white,
         black: room.black,
+        whiteUserId: room.whiteUserId,
+        blackUserId: room.blackUserId,
         whiteName: room.whiteName,
         blackName: room.blackName,
         whiteRating: room.whiteRating,
@@ -447,6 +453,8 @@ const initializeSocket = (server) => {
       room.pendingDrawOffer = null;
       if (accepted) {
         room.gameOver = true;
+        room.termination = "draw";
+        room.winner = null;
         io.to(roomId).emit("draw-accepted");
         cleanUpRoom(roomId);
       } else {
@@ -458,8 +466,11 @@ const initializeSocket = (server) => {
       const room = rooms[roomId];
       if (!room || room.gameOver) return;
       room.gameOver = true;
-      const winner = socket.id === room.white ? "black" : "white";
-      io.to(roomId).emit("player-resigned", { winner });
+      const winnerColor = socket.id === room.white ? "b" : "w";
+      room.termination = "resignation";
+      room.winner = winnerColor;
+      // Keep existing event shape (human-readable) for clients listening to player-resigned
+      io.to(roomId).emit("player-resigned", { winner: winnerColor === "w" ? "white" : "black" });
       room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
     });
 
@@ -592,6 +603,29 @@ const initializeSocket = (server) => {
       const room = rooms[roomId];
       if (!room) return;
       room.gameOver = true;
+      room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
+    });
+
+    // Client-driven game end with details (e.g. checkmate) — broadcast so both clients can clear state
+    socket.on("game-ended", ({ roomId, termination, winner, pgn, moves, fen }) => {
+      const room = rooms[roomId];
+      if (!room) return;
+
+      if (room.gameEndedHandled) return;
+      room.gameEndedHandled = true;
+
+      room.gameOver = true;
+      room.termination = termination || null;
+      room.winner = winner || null;
+      if (Array.isArray(moves)) room.moves = moves;
+      if (typeof fen === "string") room.fen = fen;
+      io.to(roomId).emit("game-ended", {
+        termination: room.termination,
+        winner: room.winner,
+        pgn: pgn || null,
+        moves: room.moves,
+        fen: room.fen,
+      });
       room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
     });
 

@@ -38,8 +38,8 @@ const MultiplayerTester = ({
         whiteRating: data.whiteRating || 1200,
         blackRating: data.blackRating || 1200,
 
-        whiteId: data.white,
-        blackId: data.black,
+        whiteId: data.whiteUserId,
+        blackId: data.blackUserId,
 
         timeControl: data.timeControl,
 
