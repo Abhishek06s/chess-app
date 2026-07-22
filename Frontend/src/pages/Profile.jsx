@@ -16,7 +16,6 @@ import {
   ExternalLink,
   Clock,
   ArrowUpRight,
-  ShieldAlert,
 } from "lucide-react";
 
 const formatGameDate = (dateString) => {
@@ -320,6 +319,10 @@ const Profile = () => {
                     const termination =
                       terminationLabels[game.termination] || game.termination;
 
+                    // Extract the historical ratings for both players
+                    const userRating = resultInfo.isWhite ? game.whiteRating : game.blackRating;
+                    const opponentRating = resultInfo.isWhite ? game.blackRating : game.whiteRating;
+
                     return (
                       <div
                         key={game._id}
@@ -350,33 +353,44 @@ const Profile = () => {
 
                           <div className="space-y-1.5">
                             <div className="flex flex-wrap items-center gap-2.5">
-                              {/* Outcome Badge */}
-                              <span
-                                className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md border ${resultInfo.bg}`}
-                              >
-                                {resultInfo.text}
-                              </span>
+                              {/* Outcome Badge and User Rating */}
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md border ${resultInfo.bg}`}
+                                >
+                                  {resultInfo.text}
+                                </span>
+                              </div>
 
-                              {/* Opponent Info */}
                               <span className="text-zinc-400 text-sm font-medium">
                                 vs
                               </span>
-                              {opponent && !opponent.isBot ? (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    navigate(`/profile/${opponent.username}`);
-                                  }}
-                                  className="text-white font-semibold text-base hover:text-indigo-400 hover:underline transition-all flex items-center gap-1"
-                                >
-                                  {opponent.username}
-                                  <ExternalLink className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 transition-opacity" />
-                                </button>
-                              ) : (
-                                <span className="italic text-zinc-500 font-medium">
-                                  {opponent?.username || "Engine Bot"}
-                                </span>
-                              )}
+
+                              {/* Opponent Info and Rating */}
+                              <div className="flex items-center gap-1.5">
+                                {opponent && !opponent.isBot ? (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      navigate(`/profile/${opponent.username}`);
+                                    }}
+                                    className="text-white font-semibold text-base hover:text-indigo-400 hover:underline transition-all flex items-center gap-1"
+                                  >
+                                    {opponent.username}
+                                    <ExternalLink className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 transition-opacity" />
+                                  </button>
+                                ) : (
+                                  <span className="italic text-zinc-300 font-medium">
+                                    {opponent?.username || "Engine Bot"}
+                                  </span>
+                                )}
+
+                                {opponentRating !== null && opponentRating !== undefined && (
+                                  <span className="text-[12px] font-mono font-medium text-zinc-200 bg-zinc-800/50 px-1.5 py-0.5 rounded border border-zinc-700/50">
+                                    {opponentRating}
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             {/* Opening Details & Termination */}

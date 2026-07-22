@@ -58,7 +58,7 @@ const calculateGameType = (baseInSeconds, incrementInSeconds) => {
 };
 
 const Play = () => {
-  const { user, loading: authLoading } = useAuth();
+  const { user, setUser, loading: authLoading } = useAuth();
 
   const [guestUser, setGuestUser] = useState(null);
   const activeUser = user || guestUser;
@@ -83,7 +83,8 @@ const Play = () => {
   const [pendingReconnect, setPendingReconnect] = useState(false);
   const [pendingSessionReconnect, setPendingSessionReconnect] = useState(false);
   const sessionReconnectRetryRef = useRef(false);
-  const [hasSessionRestorePending, setHasSessionRestorePending] = useState(false);
+  const [hasSessionRestorePending, setHasSessionRestorePending] =
+    useState(false);
 
   const [incomingDrawOffer, setIncomingDrawOffer] = useState(false);
   const [drawOfferPending, setDrawOfferPending] = useState(false);
@@ -95,13 +96,16 @@ const Play = () => {
   const [whitePlayerId, setWhitePlayerId] = useState(null);
   const [blackPlayerId, setBlackPlayerId] = useState(null);
 
+  const [whiteRatingChange, setWhiteRatingChange] = useState(null);
+  const [blackRatingChange, setBlackRatingChange] = useState(null);
+
   const [disconnectCountdown, setDisconnectCountdown] = useState(null);
   const [disconnectedColor, setDisconnectedColor] = useState(null);
   const [disconnectIsAbort, setDisconnectIsAbort] = useState(false);
   const [whiteAbortCountdown, setWhiteAbortCountdown] = useState(null);
   const [blackAbortCountdown, setBlackAbortCountdown] = useState(null);
 
-  const [isRated, setIsRated] = useState("false");
+  const [isRated, setIsRated] = useState(false);
 
   const [multiplayerWhiteTime, setMultiplayerWhiteTime] = useState(
     timeControl.base * 1000,
@@ -136,6 +140,7 @@ const Play = () => {
       blackPlayerName,
       timeControl,
       gameType,
+      isRated,
     };
   });
 
@@ -215,6 +220,15 @@ const Play = () => {
         ? `Auto aborting in ${disconnectCountdown}s`
         : `Auto resignation in ${disconnectCountdown}s`
       : undefined);
+
+  // ── Clear rating-change indicators when a new game starts ──────────────────
+
+  useEffect(() => {
+    if (gameStarted) {
+      setWhiteRatingChange(null);
+      setBlackRatingChange(null);
+    }
+  }, [gameStarted]);
 
   // ── Hydrate guest from localStorage ────────────────────────────────────────
 
@@ -477,7 +491,7 @@ const Play = () => {
   // ── RECONNECT: session-game-found / session-game-not-found ─────────────────
 
   useEffect(() => {
-      const handleSessionGameFound = (roomState) => {
+    const handleSessionGameFound = (roomState) => {
       sessionReconnectRetryRef.current = false;
       applyRoomState(roomState);
       setPendingSessionReconnect(false);
@@ -694,6 +708,53 @@ const Play = () => {
     }
   }, [gameStarted]);
 
+  // ── Apply rating-change payload to the UI ───────────────────────────────────
+
+  const applyRatingChanges = (ratingChanges) => {
+    if (!ratingChanges) return;
+
+    const { whitePlayerId: currentWhitePlayerId, gameType: currentGameType } =
+      latestGameStateRef.current;
+
+    setWhitePlayerRating(ratingChanges.white.rating.after);
+    setBlackPlayerRating(ratingChanges.black.rating.after);
+    setWhiteRatingChange(ratingChanges.white.rating.diff);
+    setBlackRatingChange(ratingChanges.black.rating.diff);
+
+    setUser((prevUser) => {
+      if (!prevUser) return prevUser;
+      const userId = prevUser._id || prevUser.id;
+      if (!userId) return prevUser;
+
+      const isWhite = currentWhitePlayerId
+        ? String(currentWhitePlayerId) === String(userId)
+        : false;
+      const isBlack = !isWhite;
+
+      const newRating = isWhite
+        ? ratingChanges.white.rating.after
+        : ratingChanges.black.rating.after;
+
+      const newRd = isWhite
+        ? ratingChanges.white.rd.after
+        : ratingChanges.black.rd.after;
+
+      if (!isWhite && !isBlack) return prevUser;
+
+      return {
+        ...prevUser,
+        stats: {
+          ...prevUser.stats,
+          [currentGameType]: {
+            ...prevUser.stats?.[currentGameType],
+            rating: newRating,
+            rd: newRd, 
+          },
+        },
+      };
+    });
+  };
+
   // ── Database save ──────────────────────────────────────────────────────────
 
   const saveGameToDatabase = async (
@@ -704,7 +765,7 @@ const Play = () => {
     overrideOpponentType,
     overrideOpponentName,
     status = "completed",
-    rated,
+    _unusedRatedArg,
     finalPgnOverride = null,
     finalMovesOverride = null,
     finalFenOverride = null,
@@ -722,6 +783,7 @@ const Play = () => {
       blackPlayerName: currentBlackPlayerName,
       timeControl: currentTimeControl,
       gameType: currentGameType,
+      isRated: currentIsRated,
     } = latestGameStateRef.current;
 
     if (!currentUser) return;
@@ -782,7 +844,7 @@ const Play = () => {
             : currentWhitePlayerName
           : "Stockfish Bot");
 
-      await createGame({
+      const response = await createGame({
         whitePlayer: isMultiplayer ? currentWhitePlayerId : currentUserId,
         blackPlayer: isMultiplayer ? currentBlackPlayerId : currentUserId,
         pgn: finalPgn,
@@ -799,11 +861,22 @@ const Play = () => {
         blackTimeRemaining: Math.max(0, Math.round(finalBlackTime / 1000)),
         opponentType: finalOpponentType,
         opponentName: finalOpponentName,
-        rated: isMultiplayer && rated,
+        rated: isMultiplayer && !!currentIsRated,
         termination,
         status,
         roomId: isMultiplayer ? currentRoomId : undefined,
       });
+
+      if (response?.ratingChanges) {
+        applyRatingChanges(response.ratingChanges);
+
+        if (isMultiplayer) {
+          socket.emit("rating-update", {
+            roomId: currentRoomId,
+            ratingChanges: response.ratingChanges,
+          });
+        }
+      }
     } catch (error) {
       console.error(
         "Database tracking persist save transaction failed:",
@@ -1006,7 +1079,8 @@ const Play = () => {
       clearStoredMultiplayerSession();
       chessSounds.playGameEndSound();
 
-      const result = winner === "w" ? "1-0" : winner === "b" ? "0-1" : "1/2-1/2";
+      const result =
+        winner === "w" ? "1-0" : winner === "b" ? "0-1" : "1/2-1/2";
       const { multiplayerWhiteTime: wt, multiplayerBlackTime: bt } =
         latestGameStateRef.current;
       saveGameToDatabase(
@@ -1027,6 +1101,16 @@ const Play = () => {
     socket.on("game-ended", handleGameEnded);
     return () => socket.off("game-ended", handleGameEnded);
   }, [multiplayerWhiteTime, multiplayerBlackTime, playerColor, chessSounds]);
+
+  // ── Rating update relay (multiplayer opponent) ──────────────────────────────
+
+  useEffect(() => {
+    const handleRatingUpdate = (ratingChanges) => {
+      applyRatingChanges(ratingChanges);
+    };
+    socket.on("rating-update", handleRatingUpdate);
+    return () => socket.off("rating-update", handleRatingUpdate);
+  }, []);
 
   if (authLoading) {
     return (
@@ -1065,6 +1149,9 @@ const Play = () => {
             }
             rating={
               playerColor === "white" ? blackPlayerRating : whitePlayerRating
+            }
+            ratingChange={
+              playerColor === "white" ? blackRatingChange : whiteRatingChange
             }
             isOnline={true}
             color={playerColor === "white" ? "black" : "white"}
@@ -1142,6 +1229,9 @@ const Play = () => {
                 : playerColor === "white"
                   ? whitePlayerRating
                   : blackPlayerRating
+            }
+            ratingChange={
+              playerColor === "white" ? whiteRatingChange : blackRatingChange
             }
             isOnline={true}
             color={playerColor}

@@ -1,34 +1,40 @@
-const getKFactor = (gamesPlayed) => {
-  if (gamesPlayed < 10) return 40;
-  if (gamesPlayed < 20) return 30;
-  if (gamesPlayed < 30) return 20;
+const Q = Math.log(10) / 400; 
+const MIN_RATING = 100;
+const MIN_RD = 30; 
 
-  return 16;
+const calculateG = (rd) => {
+  return 1 / Math.sqrt(1 + (3 * Math.pow(Q, 2) * Math.pow(rd, 2)) / Math.pow(Math.PI, 2));
 };
 
-const getExpectedScore = (playerRating, opponentRating) => {
-  return 1 / (
-    1 + Math.pow(10, (opponentRating - playerRating) / 400)
-  );
+const getExpectedScore = (playerRating, opponentRating, opponentRD) => {
+  const gOpp = calculateG(opponentRD);
+  return 1 / (1 + Math.pow(10, (-gOpp * (playerRating - opponentRating)) / 400));
 };
 
 const calculateNewRating = (
   playerRating,
+  playerRD,
   opponentRating,
-  actualScore,
-  gamesPlayed,
+  opponentRD,
+  actualScore 
 ) => {
-  const expected = getExpectedScore(
-    playerRating,
-    opponentRating,
-  );
+  const expected = getExpectedScore(playerRating, opponentRating, opponentRD);
+  const gOpp = calculateG(opponentRD);
 
-  const kFactor = getKFactor(gamesPlayed);
+  
+  const varianceD2 = 1 / (Math.pow(Q, 2) * Math.pow(gOpp, 2) * expected * (1 - expected));
 
-  return Math.round(
-    playerRating +
-      kFactor * (actualScore - expected),
-  );
+  
+  const kFactorEquivalent = Q / (1 / Math.pow(playerRD, 2) + 1 / varianceD2);
+  const newRating = playerRating + kFactorEquivalent * gOpp * (actualScore - expected);
+
+  
+  const newRD = Math.sqrt(1 / (1 / Math.pow(playerRD, 2) + 1 / varianceD2));
+
+  return {
+    rating: Math.max(MIN_RATING, Math.round(newRating)),
+    rd: Math.max(MIN_RD, newRD) 
+  };
 };
 
 module.exports = {

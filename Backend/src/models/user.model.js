@@ -6,6 +6,11 @@ const statsSchema = {
     default: 1200,
   },
 
+  rd: { 
+    type: Number,
+    default: 350 
+  },
+
   gamesPlayed: {
     type: Number,
     default: 0,

@@ -565,6 +565,7 @@ const initializeSocket = (server) => {
           normalizedColor = "b";
 
         if (!normalizedColor) continue;
+        if (room.gameOver) continue;
 
         socket.join(roomId);
 
@@ -597,6 +598,11 @@ const initializeSocket = (server) => {
       } else {
         socket.emit("session-game-not-found");
       }
+    });
+
+    socket.on("rating-update", ({ roomId, ratingChanges }) => {
+      if (!roomId || !ratingChanges) return;
+      io.to(roomId).emit("rating-update", ratingChanges);
     });
 
     socket.on("game-over", ({ roomId }) => {

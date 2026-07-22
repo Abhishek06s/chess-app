@@ -46,8 +46,10 @@ const createGame = async (req, res) => {
     const finalWhitePlayer = whitePlayer || req.user._id;
     const finalBlackPlayer = blackPlayer || req.user._id;
 
-    const finalPlayer1 = opponentType === "human" ? finalWhitePlayer : undefined;
-    const finalPlayer2 = opponentType === "human" ? finalBlackPlayer : undefined;
+    const finalPlayer1 =
+      opponentType === "human" ? finalWhitePlayer : undefined;
+    const finalPlayer2 =
+      opponentType === "human" ? finalBlackPlayer : undefined;
 
     if (opponentType === "human") {
       if (roomId) {
@@ -73,6 +75,24 @@ const createGame = async (req, res) => {
       }
     }
 
+    let whiteUser = null;
+    let blackUser = null;
+    let initialWhiteRating = null;
+    let initialBlackRating = null;
+
+    if (opponentType === "human") {
+      whiteUser = await User.findById(finalWhitePlayer);
+      blackUser = await User.findById(finalBlackPlayer);
+
+      if (!whiteUser || !blackUser)
+        return res
+          .status(404)
+          .json({ success: false, message: "Player account not found" });
+
+      initialWhiteRating = whiteUser.stats[gameType].rating;
+      initialBlackRating = blackUser.stats[gameType].rating;
+    }
+
     let game;
     try {
       game = await Game.create({
@@ -80,6 +100,8 @@ const createGame = async (req, res) => {
         blackPlayer: finalBlackPlayer,
         player1: finalPlayer1,
         player2: finalPlayer2,
+        whiteRating: initialWhiteRating, 
+        blackRating: initialBlackRating,
         roomId: opponentType === "human" ? roomId || null : null,
         pgn,
         fen,
@@ -92,7 +114,7 @@ const createGame = async (req, res) => {
         blackTimeRemaining,
         opponentType,
         opponentName,
-        rated: opponentType === "bot" ? false : !!rated, // bot games are always unrated
+        rated: opponentType === "bot" ? false : !!rated,
         termination,
         status,
       });
@@ -113,8 +135,8 @@ const createGame = async (req, res) => {
     }
 
     // ── Human (multiplayer) game: update stats + ratings ──────────────────────
-    const whiteUser = await User.findById(finalWhitePlayer);
-    const blackUser = await User.findById(finalBlackPlayer);
+    whiteUser = await User.findById(finalWhitePlayer);
+    blackUser = await User.findById(finalBlackPlayer);
 
     if (!whiteUser || !blackUser)
       return res
@@ -122,6 +144,8 @@ const createGame = async (req, res) => {
         .json({ success: false, message: "Player account not found" });
 
     const isSelfPlay = whiteUser._id.toString() === blackUser._id.toString();
+
+    let ratingChanges = null;
 
     if (isSelfPlay) {
       // Self-play (edge case) — count stats once, no rating change
@@ -149,30 +173,75 @@ const createGame = async (req, res) => {
         bs.draws += 1;
       }
 
-      // ── Elo update (rated games only) ─────────────────────────────────────
+      // ── Glicko update (rated games only) ──────────────────────────────────
       if (rated) {
         const whiteScore = result === "1-0" ? 1 : result === "0-1" ? 0 : 0.5;
         const blackScore = 1 - whiteScore;
 
-        ws.rating = calculateNewRating(
-          ws.rating,
-          bs.rating,
+        // Snapshot rating and RD before calculation (default RD = 350 for unranked/new players)
+        const whiteRatingBefore = ws.rating;
+        const whiteRdBefore = ws.rd ?? 350;
+
+        const blackRatingBefore = bs.rating;
+        const blackRdBefore = bs.rd ?? 350;
+
+        // Calculate new Glicko ratings & RDs
+        const whiteUpdated = calculateNewRating(
+          whiteRatingBefore,
+          whiteRdBefore,
+          blackRatingBefore,
+          blackRdBefore,
           whiteScore,
-          ws.gamesPlayed,
         );
-        bs.rating = calculateNewRating(
-          bs.rating,
-          ws.rating,
+
+        const blackUpdated = calculateNewRating(
+          blackRatingBefore,
+          blackRdBefore,
+          whiteRatingBefore,
+          whiteRdBefore,
           blackScore,
-          bs.gamesPlayed,
         );
+
+        // Mutate stats
+        ws.rating = whiteUpdated.rating;
+        ws.rd = whiteUpdated.rd;
+
+        bs.rating = blackUpdated.rating;
+        bs.rd = blackUpdated.rd;
+
+        ratingChanges = {
+          white: {
+            rating: {
+              before: whiteRatingBefore,
+              after: ws.rating,
+              diff: ws.rating - whiteRatingBefore,
+            },
+            rd: {
+              before: whiteRdBefore,
+              after: ws.rd,
+              diff: ws.rd - whiteRdBefore,
+            },
+          },
+          black: {
+            rating: {
+              before: blackRatingBefore,
+              after: bs.rating,
+              diff: bs.rating - blackRatingBefore,
+            },
+            rd: {
+              before: blackRdBefore,
+              after: bs.rd,
+              diff: bs.rd - blackRdBefore,
+            },
+          },
+        };
       }
 
       await whiteUser.save();
       await blackUser.save();
     }
 
-    res.status(201).json({ success: true, game });
+    res.status(201).json({ success: true, game, ratingChanges });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -181,7 +250,6 @@ const createGame = async (req, res) => {
 /**
  * Get My Games
  */
-
 const getMyGames = async (req, res) => {
   try {
     const games = await Game.find({
@@ -209,7 +277,6 @@ const getMyGames = async (req, res) => {
 /**
  * Get Particular Game
  */
-
 const getGameById = async (req, res) => {
   try {
     const game = await Game.findById(req.params.id)
@@ -240,7 +307,6 @@ const getGameById = async (req, res) => {
 /**
  * Delete Particular Game
  */
-
 const deleteGame = async (req, res) => {
   try {
     const game = await Game.findById(req.params.id);
@@ -283,7 +349,7 @@ const deleteGame = async (req, res) => {
 const getGamesByUserId = async (req, res) => {
   try {
     const { userId } = req.params;
-  
+
     const games = await Game.find({
       $or: [{ whitePlayer: userId }, { blackPlayer: userId }],
     })

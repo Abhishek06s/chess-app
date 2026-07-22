@@ -34,6 +34,22 @@ const gameSchema = new mongoose.Schema(
       },
     },
 
+    whiteRating: {
+      type: Number,
+      default: null,
+      required: function () {
+        return this.opponentType === "human";
+      },
+    },
+
+    blackRating: {
+      type: Number,
+      default: null,
+      required: function () {
+        return this.opponentType === "human";
+      },
+    },
+
     roomId: {
       type: String,
       default: null,

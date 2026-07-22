@@ -88,10 +88,14 @@ const PlayerCard = ({
 
         <div className="flex items-center gap-2">
           <p className="text-zinc-400 text-sm">Rating: {rating}</p>
-          {ratingChange !== null && ratingChange !== 0 && (
+          {ratingChange !== null && (
             <span
               className={`text-xs font-bold ${
-                ratingChange > 0 ? "text-emerald-400" : "text-rose-400"
+                ratingChange > 0
+                  ? "text-emerald-400"
+                  : ratingChange < 0
+                    ? "text-rose-400"
+                    : "text-zinc-400"
               }`}
             >
               {ratingChange > 0 ? `+${ratingChange}` : ratingChange}
