@@ -235,49 +235,62 @@ const initializeSocket = (server) => {
   io.on("connection", (socket) => {
     console.log("User Connected:", socket.id);
 
-    socket.on("create-room", ({ username, rating, timeControl }) => {
-      const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-      const gameType = getGameType(timeControl.base, timeControl.increment);
-      const startingFen = new Chess().fen();
+    socket.on(
+      "create-room",
+      ({ username, rating, timeControl, isRated = true }) => {
+        const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+        const gameType = getGameType(timeControl.base, timeControl.increment);
+        const startingFen = new Chess().fen();
 
-      rooms[roomId] = {
-        white: socket.id,
-        black: null,
-        whiteUserId: getUserIdFromSocket(socket),
-        blackUserId: null,
-        whiteName: username,
-        blackName: null,
-        gameType,
-        timeControl: {
-          base: timeControl.base,
-          increment: timeControl.increment,
-        },
-        whiteRating: rating?.[gameType]?.rating || 1200,
-        blackRating: null,
-        whiteTimeRemaining: timeControl.base * 1000,
-        blackTimeRemaining: timeControl.base * 1000,
-        activeColor: "w",
-        lastMoveTime: null,
-        moveCount: 0,
-        gameOver: false,
-        pendingDrawOffer: null,
-        disconnected: null,
-        cleanupTimeout: null,
-        fen: startingFen,
-        moves: [],
-        firstMoveAbortSeconds: null,
-        whiteMoved: false,
-        blackMoved: false,
-      };
+        rooms[roomId] = {
+          white: socket.id,
+          black: null,
+          whiteUserId: getUserIdFromSocket(socket),
+          blackUserId: null,
+          whiteName: username,
+          blackName: null,
+          gameType,
+          timeControl: {
+            base: timeControl.base,
+            increment: timeControl.increment,
+          },
+          isRated: Boolean(isRated),
+          whiteRating: rating?.[gameType]?.rating || 1200,
+          blackRating: null,
+          whiteTimeRemaining: timeControl.base * 1000,
+          blackTimeRemaining: timeControl.base * 1000,
+          activeColor: "w",
+          lastMoveTime: null,
+          moveCount: 0,
+          gameOver: false,
+          pendingDrawOffer: null,
+          disconnected: null,
+          cleanupTimeout: null,
+          fen: startingFen,
+          moves: [],
+          firstMoveAbortSeconds: null,
+          whiteMoved: false,
+          blackMoved: false,
+        };
 
-      socket.join(roomId);
-      socket.emit("room-created", roomId);
-    });
+        socket.join(roomId);
+        socket.emit("room-created", roomId);
+      },
+    );
 
-    socket.on("join-room", ({ roomId, username, rating }) => {
+    socket.on("join-room", ({ roomId, username, rating, isRated }) => {
       const room = rooms[roomId];
       if (!room) return socket.emit("room-error", "Room not found");
       if (room.black) return socket.emit("room-error", "Room full");
+
+
+      // Prevent joining if rated/unrated preferences do not match
+      if (typeof isRated === "boolean" && room.isRated !== isRated) {
+        return socket.emit(
+          "room-error",
+          `Game mode mismatch: Room is ${room.isRated ? "Rated" : "Unrated"}.`,
+        );
+      }
 
       // ── Block self-play ──────────────────────────────────
       const joiningUserId = getUserIdFromSocket(socket);
@@ -312,6 +325,7 @@ const initializeSocket = (server) => {
         timeControl: room.timeControl,
         whiteTimeRemaining: room.whiteTimeRemaining,
         blackTimeRemaining: room.blackTimeRemaining,
+        isRated: room.isRated,
         whiteMoved: false,
         blackMoved: false,
       });
@@ -425,7 +439,9 @@ const initializeSocket = (server) => {
 
       room.pendingDrawOffer = offeringColor;
 
-        socket.to(roomId).emit("draw-offer-received" , { initiatedBy: offeringColor });
+      socket
+        .to(roomId)
+        .emit("draw-offer-received", { initiatedBy: offeringColor });
     });
 
     // ── DRAW RESPONSE ────────────────────────────────────────────────────────
@@ -470,7 +486,9 @@ const initializeSocket = (server) => {
       room.termination = "resignation";
       room.winner = winnerColor;
       // Keep existing event shape (human-readable) for clients listening to player-resigned
-      io.to(roomId).emit("player-resigned", { winner: winnerColor === "w" ? "white" : "black" });
+      io.to(roomId).emit("player-resigned", {
+        winner: winnerColor === "w" ? "white" : "black",
+      });
       room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
     });
 
@@ -567,6 +585,11 @@ const initializeSocket = (server) => {
         if (!normalizedColor) continue;
         if (room.gameOver) continue;
 
+        if (!room.black) {
+          cleanUpRoom(roomId);
+          continue;
+        }
+
         socket.join(roomId);
 
         if (normalizedColor === "w") room.white = socket.id;
@@ -613,27 +636,30 @@ const initializeSocket = (server) => {
     });
 
     // Client-driven game end with details (e.g. checkmate) — broadcast so both clients can clear state
-    socket.on("game-ended", ({ roomId, termination, winner, pgn, moves, fen }) => {
-      const room = rooms[roomId];
-      if (!room) return;
+    socket.on(
+      "game-ended",
+      ({ roomId, termination, winner, pgn, moves, fen }) => {
+        const room = rooms[roomId];
+        if (!room) return;
 
-      if (room.gameEndedHandled) return;
-      room.gameEndedHandled = true;
+        if (room.gameEndedHandled) return;
+        room.gameEndedHandled = true;
 
-      room.gameOver = true;
-      room.termination = termination || null;
-      room.winner = winner || null;
-      if (Array.isArray(moves)) room.moves = moves;
-      if (typeof fen === "string") room.fen = fen;
-      io.to(roomId).emit("game-ended", {
-        termination: room.termination,
-        winner: room.winner,
-        pgn: pgn || null,
-        moves: room.moves,
-        fen: room.fen,
-      });
-      room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
-    });
+        room.gameOver = true;
+        room.termination = termination || null;
+        room.winner = winner || null;
+        if (Array.isArray(moves)) room.moves = moves;
+        if (typeof fen === "string") room.fen = fen;
+        io.to(roomId).emit("game-ended", {
+          termination: room.termination,
+          winner: room.winner,
+          pgn: pgn || null,
+          moves: room.moves,
+          fen: room.fen,
+        });
+        room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
+      },
+    );
 
     // ── disconnect ───────────────────────────────────────────────────────────
 
@@ -645,6 +671,11 @@ const initializeSocket = (server) => {
         if (room.gameOver || room.disconnected) continue;
 
         if (room.white === socket.id || room.black === socket.id) {
+          if (!room.black) {
+            cleanUpRoom(roomId);
+            continue;
+          }
+
           const player = room.white === socket.id ? "w" : "b";
           const isAbort = room.moveCount < 2;
 

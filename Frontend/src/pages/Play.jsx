@@ -105,7 +105,7 @@ const Play = () => {
   const [whiteAbortCountdown, setWhiteAbortCountdown] = useState(null);
   const [blackAbortCountdown, setBlackAbortCountdown] = useState(null);
 
-  const [isRated, setIsRated] = useState(false);
+  const [isRated, setIsRated] = useState(true);
 
   const [multiplayerWhiteTime, setMultiplayerWhiteTime] = useState(
     timeControl.base * 1000,
@@ -748,7 +748,7 @@ const Play = () => {
           [currentGameType]: {
             ...prevUser.stats?.[currentGameType],
             rating: newRating,
-            rd: newRd, 
+            rd: newRd,
           },
         },
       };
@@ -980,15 +980,18 @@ const Play = () => {
       setGameResult("❌ Game Aborted");
       setEndgame({ type: "abort", winner: null });
     } else if (actionType === "resign") {
-      const winner = game.turn() === "w" ? "Black" : "White";
-      const winnerColor = game.turn() === "w" ? "b" : "w";
+      const winner = playerColor === "white" ? "Black" : "White";
+      const winnerColor = playerColor === "white" ? "b" : "w";
+
       setGameResult(`🏆 ${winner} Wins by Resignation`);
       setEndgame({ type: "resignation", winner: winnerColor });
       setGameStarted(false);
+
       if (gameMode === "multiplayer") {
         socket.emit("resign", { roomId });
         return;
       }
+
       saveGameToDatabase(
         winnerColor === "w" ? "1-0" : "0-1",
         "resignation",
@@ -1337,6 +1340,7 @@ const Play = () => {
           <MultiplayerTester
             activeUser={activeUser}
             timeControl={timeControl}
+            isRated={isRated}
             onClose={() => setShowMultiplayerLobby(false)}
             setMultiplayerBlackTime={setMultiplayerBlackTime}
             setMultiplayerWhiteTime={setMultiplayerWhiteTime}
@@ -1352,7 +1356,11 @@ const Play = () => {
               timeControl,
               whiteTimeRemaining,
               blackTimeRemaining,
+              isRated: roomIsRated,
             }) => {
+              if (typeof roomIsRated === "boolean") {
+                setIsRated(roomIsRated);
+              }
               resetClock();
               setGame(new Chess());
               setMoves([]);

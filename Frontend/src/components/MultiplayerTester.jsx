@@ -4,6 +4,7 @@ import { socket } from "../services/socket.service";
 const MultiplayerTester = ({
   activeUser,
   timeControl,
+  isRated = true,
   onClose,
   onGameStarted,
   setMultiplayerBlackTime,
@@ -45,6 +46,8 @@ const MultiplayerTester = ({
 
         whiteTimeRemaining: data.whiteTimeRemaining,
         blackTimeRemaining: data.blackTimeRemaining,
+
+        isRated: data.isRated ?? isRated,
       });
     });
 
@@ -99,6 +102,7 @@ const MultiplayerTester = ({
               username: activeUser.username,
               rating: activeUser.stats,
               timeControl,
+              isRated,
             })
           }
           className="px-3 py-2 bg-indigo-600 rounded-lg cursor-pointer"
@@ -112,6 +116,7 @@ const MultiplayerTester = ({
               roomId: roomCode,
               username: activeUser.username,
               rating: activeUser.stats,
+              isRated,
             })
           }
           className="px-3 py-2 bg-emerald-600 rounded-lg cursor-pointer"
