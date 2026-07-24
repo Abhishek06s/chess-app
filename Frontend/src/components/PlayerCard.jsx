@@ -11,6 +11,7 @@ const PlayerCard = ({
   advantage,
   statusText,
   ratingChange = null,
+  showClock = true,
 }) => {
   const formatTime = (ms = 0) => {
     if (typeof ms !== "number" || Number.isNaN(ms)) {
@@ -137,11 +138,13 @@ const PlayerCard = ({
       </div>
 
       <div className="flex items-center gap-4">
-        <p
-          className={`text-2xl font-bold bg-zinc-900 px-5 py-2 rounded-lg ${getTimeColor()}`}
-        >
-          {formatTime(time)}
-        </p>
+        {showClock && (
+          <p
+            className={`text-2xl font-bold bg-zinc-900 px-5 py-2 rounded-lg ${getTimeColor()}`}
+          >
+            {formatTime(time)}
+          </p>
+        )}
         <div
           className={`w-3 h-3 rounded-full ${
             isOnline ? "bg-green-500" : "bg-red-500"

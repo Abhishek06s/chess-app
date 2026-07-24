@@ -68,6 +68,8 @@ const Play = () => {
   const [moves, setMoves] = useState([]);
   const [playerColor, setPlayerColor] = useState("white");
   const [boardOrientation, setBoardOrientation] = useState("white");
+
+  const [botColorChoice, setBotColorChoice] = useState("white");
   const [boardKey, setBoardKey] = useState(0);
   const [gameStarted, setGameStarted] = useState(false);
   const [lastMove, setLastMove] = useState(null);
@@ -114,6 +116,8 @@ const Play = () => {
     timeControl.base * 1000,
   );
 
+  const hasSavedGameRef = useRef(false);
+
   useEffect(() => {
     if (!gameStarted) {
       setMultiplayerWhiteTime(timeControl.base * 1000);
@@ -147,7 +151,7 @@ const Play = () => {
   const { whiteTime, blackTime, resetClock } = useChessClock(
     game,
     moves,
-    gameStarted,
+    gameStarted && gameMode !== "bot",
     timeControl.base,
     timeControl.increment,
   );
@@ -191,6 +195,18 @@ const Play = () => {
     gameStarted &&
     (playerColor === "white" ? game.turn() === "b" : game.turn() === "w");
 
+  // ── Player Card <-> board orientation mapping ───────────────────────────────
+  const bottomCardColor =
+    gameMode === "multiplayer" ? playerColor : boardOrientation;
+  const topCardColor =
+    gameMode === "multiplayer"
+      ? playerColor === "white"
+        ? "black"
+        : "white"
+      : boardOrientation === "white"
+        ? "black"
+        : "white";
+
   const whiteAbortStatusText = whiteAbortCountdown
     ? `Auto aborting in ${whiteAbortCountdown}s`
     : undefined;
@@ -227,6 +243,7 @@ const Play = () => {
     if (gameStarted) {
       setWhiteRatingChange(null);
       setBlackRatingChange(null);
+      hasSavedGameRef.current = false;
     }
   }, [gameStarted]);
 
@@ -282,7 +299,7 @@ const Play = () => {
       }
     };
 
-    const handleDrawAccepted = () => {
+    const handleDrawAccepted = ({ whiteSocketId } = {}) => {
       setIncomingDrawOffer(false);
       setDrawOfferPending(false);
       setGameStarted(false);
@@ -292,7 +309,20 @@ const Play = () => {
       clearStoredMultiplayerSession();
       const { multiplayerWhiteTime: wt, multiplayerBlackTime: bt } =
         latestGameStateRef.current;
-      saveGameToDatabase("1/2-1/2", "draw", wt, bt);
+      saveGameToDatabase(
+        "1/2-1/2",
+        "draw",
+        wt,
+        bt,
+        undefined,
+        undefined,
+        "completed",
+        undefined,
+        null,
+        null,
+        null,
+        whiteSocketId,
+      );
     };
     const handleDrawDeclined = () => {
       setIncomingDrawOffer(false);
@@ -318,7 +348,7 @@ const Play = () => {
   // ── RESIGN ─────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const handlePlayerResigned = ({ winner }) => {
+    const handlePlayerResigned = ({ winner, whiteSocketId }) => {
       setGameStarted(false);
       const winnerName = winner === "white" ? "White" : "Black";
       setGameResult(`🏆 ${winnerName} Wins by Resignation`);
@@ -331,7 +361,20 @@ const Play = () => {
       const result = winner === "white" ? "1-0" : "0-1";
       const { multiplayerWhiteTime: wt, multiplayerBlackTime: bt } =
         latestGameStateRef.current;
-      saveGameToDatabase(result, "resignation", wt, bt);
+      saveGameToDatabase(
+        result,
+        "resignation",
+        wt,
+        bt,
+        undefined,
+        undefined,
+        "completed",
+        undefined,
+        null,
+        null,
+        null,
+        whiteSocketId,
+      );
     };
     socket.on("player-resigned", handlePlayerResigned);
     return () => socket.off("player-resigned", handlePlayerResigned);
@@ -381,6 +424,10 @@ const Play = () => {
     setWhiteAbortCountdown(null);
     setBlackAbortCountdown(null);
     setLastMove(null);
+
+    if (typeof roomState.isRated === "boolean") {
+      setIsRated(roomState.isRated);
+    }
 
     const restoredGame = new Chess(roomState.fen || new Chess().fen());
     setGame(restoredGame);
@@ -769,6 +816,7 @@ const Play = () => {
     finalPgnOverride = null,
     finalMovesOverride = null,
     finalFenOverride = null,
+    eventWhiteSocketId = null,
   ) => {
     const {
       game: currentGame,
@@ -790,8 +838,14 @@ const Play = () => {
 
     const isMultiplayer = currentGameMode === "multiplayer";
 
+    if (hasSavedGameRef.current) return;
+    hasSavedGameRef.current = true;
+
     // Only white client should persist multiplayer games to avoid duplicates
-    if (isMultiplayer && currentPlayerColor !== "white") return;
+    if (isMultiplayer) {
+      if (currentPlayerColor !== "white") return;
+      if (eventWhiteSocketId && socket.id !== eventWhiteSocketId) return;
+    }
 
     try {
       const finalMovesArray =
@@ -844,9 +898,20 @@ const Play = () => {
             : currentWhitePlayerName
           : "Stockfish Bot");
 
+      const botId = "000000000000000000000000";
+
       const response = await createGame({
-        whitePlayer: isMultiplayer ? currentWhitePlayerId : currentUserId,
-        blackPlayer: isMultiplayer ? currentBlackPlayerId : currentUserId,
+        whitePlayer: isMultiplayer
+          ? currentWhitePlayerId
+          : currentPlayerColor === "white"
+            ? currentUserId
+            : botId,
+        blackPlayer: isMultiplayer
+          ? currentBlackPlayerId
+          : currentPlayerColor === "black"
+            ? currentUserId
+            : botId,
+
         pgn: finalPgn,
         fen: finalFen,
         moves: finalMovesArray,
@@ -861,7 +926,7 @@ const Play = () => {
         blackTimeRemaining: Math.max(0, Math.round(finalBlackTime / 1000)),
         opponentType: finalOpponentType,
         opponentName: finalOpponentName,
-        rated: isMultiplayer && !!currentIsRated,
+        rated: isMultiplayer ? Boolean(currentIsRated) : false,
         termination,
         status,
         roomId: isMultiplayer ? currentRoomId : undefined,
@@ -890,6 +955,7 @@ const Play = () => {
   useEffect(() => {
     if (endgame.type) return;
     if (gameMode === "multiplayer") return;
+    if (!gameStarted) return;
 
     if (whiteFlagged) {
       setGameResult("🏆 Black Wins on Time");
@@ -968,6 +1034,7 @@ const Play = () => {
 
   const handleGameAction = (actionType) => {
     if (isGameOver) return;
+    if (!gameStarted) return;
 
     if (actionType === "abort") {
       if (gameMode === "multiplayer") {
@@ -1044,7 +1111,7 @@ const Play = () => {
 
   // ── SERVER-BROADCASTED GAME END ─────────────────────────────────────────
   useEffect(() => {
-    const handleGameEnded = ({ termination, winner, pgn, moves, fen }) => {
+    const handleGameEnded = ({ termination, winner, pgn, moves, fen, whiteSocketId }) => {
       setGameStarted(false);
       if (termination === "checkmate") {
         const winnerName = winner === "w" ? "White" : "Black";
@@ -1098,6 +1165,7 @@ const Play = () => {
         pgn || null,
         moves || null,
         fen || null,
+        whiteSocketId,
       );
     };
 
@@ -1144,33 +1212,36 @@ const Play = () => {
             name={
               gameMode === "multiplayer"
                 ? gameStarted || isGameOver
-                  ? playerColor === "white"
-                    ? blackPlayerName
-                    : whitePlayerName
+                  ? topCardColor === "white"
+                    ? whitePlayerName
+                    : blackPlayerName
                   : "Searching for Opponent..."
-                : "Opponent (Bot)"
+                : `Bot (${topCardColor === "white" ? "White" : "Black"})`
             }
             rating={
-              playerColor === "white" ? blackPlayerRating : whitePlayerRating
+              topCardColor === "white" ? whitePlayerRating : blackPlayerRating
             }
             ratingChange={
-              playerColor === "white" ? blackRatingChange : whiteRatingChange
+              topCardColor === "white" ? whiteRatingChange : blackRatingChange
             }
             isOnline={true}
-            color={playerColor === "white" ? "black" : "white"}
-            time={playerColor === "white" ? displayBlackTime : displayWhiteTime}
+            color={topCardColor}
+            showClock={gameMode === "multiplayer"}
+            time={
+              topCardColor === "white" ? displayWhiteTime : displayBlackTime
+            }
             isActive={
               !isGameOver &&
               gameStarted &&
-              (playerColor === "white"
-                ? game.turn() === "b"
-                : game.turn() === "w")
+              (topCardColor === "white"
+                ? game.turn() === "w"
+                : game.turn() === "b")
             }
             capturedPieces={
-              playerColor === "white" ? groupedWhitePieces : groupedBlackPieces
+              topCardColor === "white" ? groupedBlackPieces : groupedWhitePieces
             }
             advantage={
-              playerColor === "white" ? blackAdvantage : whiteAdvantage
+              topCardColor === "white" ? whiteAdvantage : blackAdvantage
             }
             statusText={opponentStatusText}
           />
@@ -1217,7 +1288,7 @@ const Play = () => {
           <PlayerCard
             name={
               gameMode === "multiplayer" && gameStarted
-                ? playerColor === "white"
+                ? bottomCardColor === "white"
                   ? whitePlayerName
                   : blackPlayerName
                 : activeUser
@@ -1229,28 +1300,35 @@ const Play = () => {
                 ? activeUser.stats?.[gameType]?.rating ||
                   activeUser.rating ||
                   1200
-                : playerColor === "white"
+                : bottomCardColor === "white"
                   ? whitePlayerRating
                   : blackPlayerRating
             }
             ratingChange={
-              playerColor === "white" ? whiteRatingChange : blackRatingChange
+              bottomCardColor === "white"
+                ? whiteRatingChange
+                : blackRatingChange
             }
             isOnline={true}
-            color={playerColor}
-            time={playerColor === "white" ? displayWhiteTime : displayBlackTime}
+            color={bottomCardColor}
+            showClock={gameMode === "multiplayer"}
+            time={
+              bottomCardColor === "white" ? displayWhiteTime : displayBlackTime
+            }
             isActive={
               !isGameOver &&
               gameStarted &&
-              (playerColor === "white"
+              (bottomCardColor === "white"
                 ? game.turn() === "w"
                 : game.turn() === "b")
             }
             capturedPieces={
-              playerColor === "white" ? groupedBlackPieces : groupedWhitePieces
+              bottomCardColor === "white"
+                ? groupedBlackPieces
+                : groupedWhitePieces
             }
             advantage={
-              playerColor === "white" ? whiteAdvantage : blackAdvantage
+              bottomCardColor === "white" ? whiteAdvantage : blackAdvantage
             }
             statusText={myStatusText}
           />
@@ -1280,6 +1358,11 @@ const Play = () => {
             setEndgame={setEndgame}
             gameMode={gameMode}
             setGameMode={setGameMode}
+            playerColor={playerColor}
+            setPlayerColor={setPlayerColor}
+            setBoardOrientation={setBoardOrientation}
+            botColorChoice={botColorChoice}
+            setBotColorChoice={setBotColorChoice}
             openMultiplayerLobby={() => setShowMultiplayerLobby(true)}
             incomingDrawOffer={incomingDrawOffer}
             drawOfferPending={drawOfferPending}
@@ -1364,6 +1447,7 @@ const Play = () => {
               resetClock();
               setGame(new Chess());
               setMoves([]);
+              setLastMove(null);
               resetCapturedPieces();
               setEndgame({ type: null, winner: null });
               setGameResult("");

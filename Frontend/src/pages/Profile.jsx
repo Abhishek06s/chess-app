@@ -413,10 +413,12 @@ const Profile = () => {
                         {/* Right Side: Timing Info & Action */}
                         <div className="flex items-center justify-between md:justify-end w-full md:w-auto gap-4 pt-3 md:pt-0 border-t md:border-t-0 border-zinc-800/50 pl-2 md:pl-0">
                           <div className="flex md:flex-col items-center md:items-end justify-between md:justify-center text-xs text-zinc-400 gap-2 md:gap-1">
-                            <div className="flex items-center gap-1.5 font-medium text-zinc-300 bg-zinc-800/40 px-2.5 py-1 rounded-lg border border-zinc-800">
-                              <Clock className="w-3.5 h-3.5 text-indigo-400" />
-                              <span>{formatTimeControl(game.timeControl)}</span>
-                            </div>
+                            {!opponent.isBot && (
+                              <div className="flex items-center gap-1.5 font-medium text-zinc-300 bg-zinc-800/40 px-2.5 py-1 rounded-lg border border-zinc-800">
+                                <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                                <span>{formatTimeControl(game.timeControl)}</span>
+                              </div>
+                            )}
                             <div className="flex items-center gap-1 text-zinc-500">
                               <Calendar className="w-3 h-3" />
                               <span>{formatGameDate(game.createdAt)}</span>

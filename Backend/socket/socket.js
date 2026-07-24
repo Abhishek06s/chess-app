@@ -96,6 +96,8 @@ const initializeSocket = (server) => {
     moveCount: room.moveCount,
     winner: room.winner,
     playerColor: normalizedColor === "w" ? "white" : "black",
+    isRated: room.isRated,
+    whiteSocketId: room.white,
   });
 
   // ── Disconnect enforcement ────────────────────────────────────────────────
@@ -471,7 +473,7 @@ const initializeSocket = (server) => {
         room.gameOver = true;
         room.termination = "draw";
         room.winner = null;
-        io.to(roomId).emit("draw-accepted");
+        io.to(roomId).emit("draw-accepted",{ whiteSocketId: room.white });
         cleanUpRoom(roomId);
       } else {
         io.to(roomId).emit("draw-declined");
@@ -488,6 +490,7 @@ const initializeSocket = (server) => {
       // Keep existing event shape (human-readable) for clients listening to player-resigned
       io.to(roomId).emit("player-resigned", {
         winner: winnerColor === "w" ? "white" : "black",
+        whiteSocketId: room.white,
       });
       room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
     });
@@ -656,6 +659,7 @@ const initializeSocket = (server) => {
           pgn: pgn || null,
           moves: room.moves,
           fen: room.fen,
+          whiteSocketId: room.white,
         });
         room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
       },
