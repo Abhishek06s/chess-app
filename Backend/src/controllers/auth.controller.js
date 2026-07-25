@@ -17,12 +17,12 @@ const cookieOptions = {
 };
 
 /**
-    * -Register
-*/
+ * -Register
+ */
 
 exports.register = async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, email, password, experienceLevel } = req.body;
 
     const existingUser = await User.findOne({
       $or: [{ email }, { username }],
@@ -37,10 +37,25 @@ exports.register = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const eloMap = {
+      new: 400,
+      beginner: 800,
+      intermediate: 1200,
+      advanced: 1800,
+      master: 2400,
+    };
+
+    const startingElo = eloMap[req.body.experienceLevel] || 800;
+
     const user = await User.create({
       username,
       email,
       password: hashedPassword,
+      stats: {
+        bullet: { rating: startingElo },
+        blitz: { rating: startingElo },
+        rapid: { rating: startingElo },
+      }
     });
 
     const token = generateToken(user._id);
@@ -65,8 +80,8 @@ exports.register = async (req, res) => {
 };
 
 /**
-    * -Login
-*/
+ * -Login
+ */
 
 exports.login = async (req, res) => {
   try {
@@ -74,10 +89,7 @@ exports.login = async (req, res) => {
 
     const user = await User.findOne({ email });
 
-    if (
-      !user ||
-      !(await bcrypt.compare(password, user.password))
-    ) {
+    if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(401).json({
         success: false,
         message: "Invalid credentials",
@@ -106,23 +118,23 @@ exports.login = async (req, res) => {
 };
 
 /**
-    * -Logout
-*/
+ * -Logout
+ */
 
 exports.logout = (req, res) => {
-    const token = req.cookies.token || req.headers.authorization?.split(" ")[1];
+  const token = req.cookies.token || req.headers.authorization?.split(" ")[1];
 
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: "Not logged in",
-      });
-    }
-
-    res.clearCookie("token");
-
-    res.status(200).json({
-        success: true,
-        message: "Logged out successfully",
+  if (!token) {
+    return res.status(401).json({
+      success: false,
+      message: "Not logged in",
     });
+  }
+
+  res.clearCookie("token");
+
+  res.status(200).json({
+    success: true,
+    message: "Logged out successfully",
+  });
 };

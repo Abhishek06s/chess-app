@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const statsSchema = {
   rating: {
     type: Number,
-    default: 1200,
+    default: 800,
   },
 
   rd: { 

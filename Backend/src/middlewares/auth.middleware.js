@@ -17,12 +17,19 @@ const authMiddleware = async (req, res, next) => {
       process.env.JWT_SECRET
     );
 
-    req.user = await User.findById(decoded.id).select(
-      "-password"
-    );
+    const user = await User.findById(decoded.id).select("-password");
+    if (!user) {
+      res.clearCookie("token");
+      return res.status(401).json({
+        success: false,
+        message: "User no longer exists",
+      });
+    }
 
+    req.user = user;
     next();
-  } catch (error) {
+  } 
+  catch (error) {
     res.status(401).json({
       success: false,
       message: "Invalid token",

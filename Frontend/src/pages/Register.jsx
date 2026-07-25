@@ -13,6 +13,7 @@ const Register = () => {
     username: "",
     email: "",
     password: "",
+    experienceLevel: "",
   });
 
   const [loading, setLoading] = useState(false);
@@ -81,6 +82,24 @@ const Register = () => {
             className="w-full bg-zinc-800 text-white p-3 rounded-lg outline-none"
             required
           />
+
+          {/* New Experience Level Dropdown */}
+          <select
+            name="experienceLevel"
+            value={formData.experienceLevel}
+            onChange={handleChange}
+            className="w-full bg-zinc-800 text-white p-3 rounded-lg outline-none cursor-pointer appearance-none"
+            required
+          >
+            <option value="" disabled>
+              Select experience level
+            </option>
+            <option value="new">New (Just starting out)</option>
+            <option value="beginner">Beginner (Know the basics)</option>
+            <option value="intermediate">Intermediate (Play regularly)</option>
+            <option value="advanced">Advanced (Highly competitive)</option>
+            <option value="master">Master (Tournament level)</option>
+          </select>
 
           <button
             type="submit"
