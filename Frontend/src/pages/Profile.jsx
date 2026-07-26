@@ -16,6 +16,8 @@ import {
   ExternalLink,
   Clock,
   ArrowUpRight,
+  Bot,
+  Users,
 } from "lucide-react";
 
 const formatGameDate = (dateString) => {
@@ -319,14 +321,24 @@ const Profile = () => {
                     const termination =
                       terminationLabels[game.termination] || game.termination;
 
-                    // Extract the historical ratings for both players
-                    const userRating = resultInfo.isWhite ? game.whiteRating : game.blackRating;
-                    const opponentRating = resultInfo.isWhite ? game.blackRating : game.whiteRating;
+                    const userRating = resultInfo.isWhite
+                      ? game.whiteRating
+                      : game.blackRating;
+                    const opponentRating = resultInfo.isWhite
+                      ? game.blackRating
+                      : game.whiteRating;
+
+                    // Design identifier checks
+                    const isBotGame = opponent?.isBot;
 
                     return (
                       <div
                         key={game._id}
-                        className={`group relative overflow-hidden bg-zinc-900/40 border border-zinc-800/70 ${resultInfo.glow} hover:bg-zinc-800/40 rounded-2xl transition-all duration-200 p-4 md:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4`}
+                        className={`group relative overflow-hidden bg-zinc-900/40 border ${
+                          isBotGame
+                            ? "border-amber-500/20 hover:border-amber-500/40"
+                            : "border-zinc-800/70 hover:border-indigo-500/30"
+                        } ${resultInfo.glow} hover:bg-zinc-800/40 rounded-2xl transition-all duration-200 p-4 md:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4`}
                       >
                         {/* Side Accent Bar */}
                         <div
@@ -362,6 +374,29 @@ const Profile = () => {
                                 </span>
                               </div>
 
+                              {/* Match Type Badge with Icon */}
+                              <div
+                                className={`flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md border ${
+                                  isBotGame
+                                    ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                    : "bg-indigo-500/10 text-indigo-400 border-indigo-500/20"
+                                }`}
+                              >
+                                {isBotGame ? (
+                                  <>
+                                    <Bot className="w-3 h-3" />
+                                    <span>Bot Match</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Users className="w-3 h-3" />
+                                    <span>
+                                      {game.rated ? "Rated" : "Unrated"}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+
                               <span className="text-zinc-400 text-sm font-medium">
                                 vs
                               </span>
@@ -374,22 +409,23 @@ const Profile = () => {
                                       e.stopPropagation();
                                       navigate(`/profile/${opponent.username}`);
                                     }}
-                                    className="text-white font-semibold text-base hover:text-indigo-400 hover:underline transition-all flex items-center gap-1"
+                                    className="text-white font-semibold text-base hover:text-indigo-400 hover:underline transition-all flex items-center gap-1 cursor-pointer group"
                                   >
                                     {opponent.username}
                                     <ExternalLink className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 transition-opacity" />
                                   </button>
                                 ) : (
-                                  <span className="italic text-zinc-300 font-medium">
+                                  <span className="text-zinc-300 font-medium">
                                     {opponent?.username || "Engine Bot"}
                                   </span>
                                 )}
 
-                                {opponentRating !== null && opponentRating !== undefined && (
-                                  <span className="text-[12px] font-mono font-medium text-zinc-200 bg-zinc-800/50 px-1.5 py-0.5 rounded border border-zinc-700/50">
-                                    {opponentRating}
-                                  </span>
-                                )}
+                                {opponentRating !== null &&
+                                  opponentRating !== undefined && (
+                                    <span className="text-[12px] font-mono font-medium text-zinc-200 bg-zinc-800/50 px-1.5 py-0.5 rounded border border-zinc-700/50">
+                                      {opponentRating}
+                                    </span>
+                                  )}
                               </div>
                             </div>
 
@@ -416,7 +452,9 @@ const Profile = () => {
                             {!opponent.isBot && (
                               <div className="flex items-center gap-1.5 font-medium text-zinc-300 bg-zinc-800/40 px-2.5 py-1 rounded-lg border border-zinc-800">
                                 <Clock className="w-3.5 h-3.5 text-indigo-400" />
-                                <span>{formatTimeControl(game.timeControl)}</span>
+                                <span>
+                                  {formatTimeControl(game.timeControl)}
+                                </span>
                               </div>
                             )}
                             <div className="flex items-center gap-1 text-zinc-500">

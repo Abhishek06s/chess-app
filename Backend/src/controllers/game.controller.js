@@ -27,16 +27,18 @@ const createGame = async (req, res) => {
       roomId,
     } = req.body;
 
-    if (!timeControl || typeof timeControl.base !== "number")
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid time control" });
+    if (opponentType === "human") {
+      if (!timeControl || typeof timeControl.base !== "number")
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid time control" });
 
-    const validGameTypes = ["bullet", "blitz", "rapid"];
-    if (!validGameTypes.includes(gameType))
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid game type" });
+      const validGameTypes = ["bullet", "blitz", "rapid"];
+      if (!validGameTypes.includes(gameType))
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid game type" });
+    }
 
     if (termination === "abort")
       return res
@@ -108,10 +110,12 @@ const createGame = async (req, res) => {
         moves,
         result,
         opening,
-        timeControl,
-        gameType,
-        whiteTimeRemaining,
-        blackTimeRemaining,
+        ...(opponentType === "human" && {
+          timeControl,
+          gameType,
+          whiteTimeRemaining,
+          blackTimeRemaining,
+        }),
         opponentType,
         opponentName,
         rated: opponentType === "bot" ? false : !!rated,

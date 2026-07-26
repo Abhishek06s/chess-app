@@ -179,7 +179,7 @@ const Play = () => {
     blackAdvantage,
     groupedWhitePieces,
     groupedBlackPieces,
-  } = useCapturedPieces();
+  } = useCapturedPieces(game.fen());
 
   const flipBoard = () => {
     setBoardOrientation((prev) => (prev === "white" ? "black" : "white"));
@@ -516,22 +516,32 @@ const Play = () => {
   // ── Standalone Bot Game Check on Mount ──────────────────────────────────────
   useEffect(() => {
     // Only check if user is logged in, no game is active, and it's bot mode
-    if (!user || gameStarted || pendingReconnect || pendingSessionReconnect || endgame.type)
+    if (
+      !user ||
+      gameStarted ||
+      pendingReconnect ||
+      pendingSessionReconnect ||
+      endgame.type
+    )
       return;
 
     const checkActiveBotGame = async () => {
       try {
         const data = await getActiveBotGame();
-        if (data?.activeGame) {
-          setPendingBotGame(data.activeGame);
-        }
+        setPendingBotGame(data?.activeGame || null);
       } catch (error) {
         console.error("Failed to fetch active bot game:", error);
       }
     };
 
     checkActiveBotGame();
-  }, [user, gameStarted, pendingReconnect, pendingSessionReconnect, endgame.type,]);
+  }, [
+    user,
+    gameStarted,
+    pendingReconnect,
+    pendingSessionReconnect,
+    endgame.type,
+  ]);
 
   // ── RECONNECT: player-reconnected / room-restored / room-restore-failed ────
 
@@ -944,13 +954,15 @@ const Play = () => {
         moves: finalMovesArray,
         result,
         opening: openingData,
-        timeControl: {
-          base: currentTimeControl.base,
-          increment: currentTimeControl.increment,
-        },
-        gameType: currentGameType,
-        whiteTimeRemaining: Math.max(0, Math.round(finalWhiteTime / 1000)),
-        blackTimeRemaining: Math.max(0, Math.round(finalBlackTime / 1000)),
+        ...(isMultiplayer && {
+          timeControl: {
+            base: currentTimeControl.base,
+            increment: currentTimeControl.increment,
+          },
+          gameType: currentGameType,
+          whiteTimeRemaining: Math.max(0, Math.round(finalWhiteTime / 1000)),
+          blackTimeRemaining: Math.max(0, Math.round(finalBlackTime / 1000)),
+        }),
         opponentType: finalOpponentType,
         opponentName: finalOpponentName,
         rated: isMultiplayer ? Boolean(currentIsRated) : false,
@@ -985,12 +997,43 @@ const Play = () => {
 
   // ── Bot game end reporting (de-duplicated across open tabs) ────────────────
 
-  const reportBotGameOver = (result, termination, winner, whiteT, blackT) => {
-    const { user: currentUser, game: currentGame, moves: currentMoves } =
-      latestGameStateRef.current;
+  const reportBotGameOver = (
+    result,
+    termination,
+    winner,
+    whiteT,
+    blackT,
+    finalMovesOverride,
+    finalFenOverride,
+  ) => {
+    const {
+      user: currentUser,
+      game: currentGame,
+      moves: currentMoves,
+    } = latestGameStateRef.current;
+
+    const resolvedMoves = finalMovesOverride || currentMoves;
+    const resolvedFen = finalFenOverride || currentGame.fen();
+
+    setPendingBotGame(null);
+    deleteActiveBotGame().catch((error) => {
+      console.error("Failed to clear active bot game:", error);
+    });
 
     if (!currentUser || !socket.connected) {
-      saveGameToDatabase(result, termination, whiteT, blackT);
+      saveGameToDatabase(
+        result,
+        termination,
+        whiteT,
+        blackT,
+        undefined,
+        undefined,
+        "completed",
+        undefined,
+        null,
+        resolvedMoves,
+        resolvedFen,
+      );
       return;
     }
 
@@ -998,7 +1041,19 @@ const Play = () => {
     const fallbackTimer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      saveGameToDatabase(result, termination, whiteT, blackT);
+      saveGameToDatabase(
+        result,
+        termination,
+        whiteT,
+        blackT,
+        undefined,
+        undefined,
+        "completed",
+        undefined,
+        null,
+        resolvedMoves,
+        resolvedFen,
+      );
     }, 3000);
 
     socket.emit(
@@ -1006,15 +1061,27 @@ const Play = () => {
       {
         termination,
         winner,
-        fen: currentGame.fen(),
-        moves: currentMoves,
+        fen: resolvedFen,
+        moves: resolvedMoves,
       },
       (ack) => {
         if (settled) return;
         settled = true;
         clearTimeout(fallbackTimer);
         if (!ack || ack.shouldPersist !== false) {
-          saveGameToDatabase(result, termination, whiteT, blackT);
+          saveGameToDatabase(
+            result,
+            termination,
+            whiteT,
+            blackT,
+            undefined,
+            undefined,
+            "completed",
+            undefined,
+            null,
+            resolvedMoves,
+            resolvedFen
+          );
         }
       },
     );
@@ -1069,6 +1136,8 @@ const Play = () => {
         winnerColor,
         whiteTime,
         blackTime,
+        moves,
+        game.fen()
       );
     } else if (game.isStalemate()) {
       setGameResult("🤝 Draw by Stalemate");
@@ -1284,7 +1353,6 @@ const Play = () => {
   // ── BOT GAME SYNC (multi-browser) ───────────────────────────────────────
 
   useEffect(() => {
-
     const handleBotSyncState = (state) => {
       if (!state) return;
       const restoredGame = new Chess(state.fen || new Chess().fen());
@@ -1333,7 +1401,6 @@ const Play = () => {
     const handleEngineOwner = ({ isOwner } = {}) => {
       setIsEngineOwner(!!isOwner);
     };
-
 
     const handleBotGameEnded = ({
       termination,
@@ -1526,7 +1593,11 @@ const Play = () => {
                 : `Bot (${topCardColor === "white" ? "White" : "Black"})`
             }
             rating={
-              topCardColor === "white" ? whitePlayerRating : blackPlayerRating
+              gameMode === "multiplayer"
+                ? topCardColor === "white"
+                  ? whitePlayerRating
+                  : blackPlayerRating
+                : 1500
             }
             ratingChange={
               topCardColor === "white" ? whiteRatingChange : blackRatingChange

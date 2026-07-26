@@ -82,7 +82,6 @@ const gameSchema = new mongoose.Schema(
         type: String,
         default: "Unknown",
       },
-
       eco: {
         type: String,
         default: "",
@@ -92,24 +91,29 @@ const gameSchema = new mongoose.Schema(
     timeControl: {
       base: {
         type: Number,
-        required: true,
+        required: function () {
+          return this.opponentType === "human";
+        },
       },
 
       increment: {
         type: Number,
-        default: 0,
+        required: function () {
+          return this.opponentType === "human";
+        },
       },
     },
 
     gameType: {
       type: String,
       enum: ["bullet", "blitz", "rapid"],
-      required: true,
+      required: function () {
+        return this.opponentType === "human";
+      },
     },
 
     whiteTimeRemaining: {
       type: Number,
-      default: 0,
       required: function () {
         return this.opponentType === "human";
       },
@@ -117,7 +121,6 @@ const gameSchema = new mongoose.Schema(
 
     blackTimeRemaining: {
       type: Number,
-      default: 0,
       required: function () {
         return this.opponentType === "human";
       },

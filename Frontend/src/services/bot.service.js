@@ -1,6 +1,7 @@
 import { Chess } from "chess.js";
 
 let engine = null;
+let engineReady = null; 
 
 const queue = [];
 let isThinking = false;
@@ -12,12 +13,62 @@ const MAX_ELO = 2900;
 const MIN_THINK_MS = 500;
 const MAX_THINK_MS = 1000;
 
-function getEngine() {
-  if (!engine) {
-    engine = new Worker("/stockfish/stockfish-18-lite-single.js");
-    engine.postMessage("uci");
-    engine.postMessage("setoption name UCI_LimitStrength value true");
+let pendingWaits = [];
+
+function dispatchLine(line) {
+  if (typeof line !== "string") return;
+  pendingWaits = pendingWaits.filter((waiter) => {
+    if (waiter.test(line)) {
+      waiter.resolve(line);
+      return false;
+    }
+    return true;
+  });
+}
+
+function waitForLine(test, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const waiter = { test, resolve: null };
+    const timer = setTimeout(() => {
+      pendingWaits = pendingWaits.filter((w) => w !== waiter);
+      reject(new Error("Timed out waiting for engine response"));
+    }, timeoutMs);
+
+    waiter.resolve = (line) => {
+      clearTimeout(timer);
+      resolve(line);
+    };
+    pendingWaits.push(waiter);
+  });
+}
+
+function createEngineWorker() {
+  const worker = new Worker("/stockfish/stockfish-18-lite-single.js");
+  worker.addEventListener("message", (event) => dispatchLine(event.data));
+  return worker;
+}
+
+async function getEngine() {
+  if (engine && engineReady) {
+    await engineReady;
+    return engine;
   }
+
+  engine = createEngineWorker();
+
+  engineReady = (async () => {
+    const uciOk = waitForLine((line) => line === "uciok");
+    engine.postMessage("uci");
+    await uciOk;
+
+    engine.postMessage("setoption name UCI_LimitStrength value true");
+
+    const readyOk = waitForLine((line) => line === "readyok");
+    engine.postMessage("isready");
+    await readyOk;
+  })();
+
+  await engineReady;
   return engine;
 }
 
@@ -31,7 +82,7 @@ function finishTurn() {
   processQueue();
 }
 
-function processQueue() {
+async function processQueue() {
   if (isThinking || queue.length === 0) return;
   isThinking = true;
 
@@ -46,56 +97,58 @@ function processQueue() {
       return;
     }
 
-    const worker = getEngine();
+    const worker = await getEngine();
     const startedAt = Date.now();
-
+    
     worker.postMessage(`setoption name UCI_Elo value ${clampElo(elo)}`);
+    const readyOk = waitForLine((line) => line === "readyok");
+    worker.postMessage("isready");
+    await readyOk;
 
-    worker.onmessage = (event) => {
-      const line = event.data;
-      if (typeof line !== "string" || !line.startsWith("bestmove")) return;
-
-      const rawMove = line.split(" ")[1];
-      if (!rawMove || rawMove === "(none)") {
-        resolve(null);
-        finishTurn();
-        return;
-      }
-
-      const move = {
-        from: rawMove.slice(0, 2),
-        to: rawMove.slice(2, 4),
-        promotion: rawMove[4] || undefined,
-      };
-
-      let san = null;
-      try {
-        const verifyGame = new Chess(fen);
-        const result = verifyGame.move(move);
-        san = result ? result.san : null;
-      } catch {
-        san = null;
-      }
-
-      if (!san) {
-        resolve(null);
-        finishTurn();
-        return;
-      }
-
-      const elapsed = Date.now() - startedAt;
-      const target =
-        MIN_THINK_MS + Math.random() * (MAX_THINK_MS - MIN_THINK_MS);
-      const remainingDelay = Math.max(0, target - elapsed);
-
-      setTimeout(() => {
-        resolve({ ...move, san });
-        finishTurn();
-      }, remainingDelay);
-    };
+    const bestMove = waitForLine((line) => line.startsWith("bestmove"), 30000);
 
     worker.postMessage(`position fen ${fen}`);
     worker.postMessage(`go depth ${depth}`);
+
+    const line = await bestMove;
+    const rawMove = line.split(" ")[1];
+
+    if (!rawMove || rawMove === "(none)") {
+      resolve(null);
+      finishTurn();
+      return;
+    }
+
+    const move = {
+      from: rawMove.slice(0, 2),
+      to: rawMove.slice(2, 4),
+      promotion: rawMove[4] || undefined,
+    };
+
+    let san = null;
+    try {
+      const verifyGame = new Chess(fen);
+      const result = verifyGame.move(move);
+      san = result ? result.san : null;
+    } catch {
+      san = null;
+    }
+
+    if (!san) {
+      resolve(null);
+      finishTurn();
+      return;
+    }
+
+    const elapsed = Date.now() - startedAt;
+    const target =
+      MIN_THINK_MS + Math.random() * (MAX_THINK_MS - MIN_THINK_MS);
+    const remainingDelay = Math.max(0, target - elapsed);
+
+    setTimeout(() => {
+      resolve({ ...move, san });
+      finishTurn();
+    }, remainingDelay);
   } catch (err) {
     reject(err);
     finishTurn();
@@ -171,8 +224,12 @@ export function stopBot() {
   if (engine) {
     engine.postMessage("stop");
   }
+  
+  
+  queue.forEach((item) => item.resolve(null));
   queue.length = 0;
   isThinking = false;
+  pendingWaits = [];
 }
 
 /** Fully tear down the engine worker (e.g. when leaving a bot game). */
@@ -180,7 +237,10 @@ export function terminateBot() {
   if (engine) {
     engine.terminate();
     engine = null;
+    engineReady = null;
   }
+  queue.forEach((item) => item.resolve(null));
   queue.length = 0;
   isThinking = false;
+  pendingWaits = [];
 }

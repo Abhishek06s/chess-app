@@ -247,8 +247,9 @@ const ChessBoard = ({
       const result = gameCopy.move(move);
 
       if (result) {
+        const newMoves = [...moves, result.san];
         setGame(gameCopy);
-        setMoves((prevMoves) => [...prevMoves, result.san]);
+        setMoves(newMoves);
         setLastMove({ from: move.from, to: move.to });
 
         if (gameMode === "multiplayer") {
@@ -285,7 +286,7 @@ const ChessBoard = ({
               termination,
               winner,
               pgn: null,
-              moves: finalMoves,
+              moves: newMoves,
               fen: finalFen,
             });
           }
