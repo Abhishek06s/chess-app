@@ -110,11 +110,17 @@ const gameSchema = new mongoose.Schema(
     whiteTimeRemaining: {
       type: Number,
       default: 0,
+      required: function () {
+        return this.opponentType === "human";
+      },
     },
 
     blackTimeRemaining: {
       type: Number,
       default: 0,
+      required: function () {
+        return this.opponentType === "human";
+      },
     },
 
     opponentType: {

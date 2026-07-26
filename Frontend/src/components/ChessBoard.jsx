@@ -1,8 +1,9 @@
-import React, { forwardRef, useMemo, useEffect } from "react";
+import React, { forwardRef, useMemo, useEffect, useRef } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import useChessSounds from "../hooks/useChessSounds";
 import { socket } from "../services/socket.service";
+import { triggerBotMove } from "../services/bot.service";
 import { Crown, Flag, Timer } from "lucide-react";
 
 const ChessBoard = ({
@@ -16,11 +17,14 @@ const ChessBoard = ({
   setLastMove,
   endgame,
   gameMode,
+  gameStarted,
+  playerColor,
   roomId,
   multiplayerColor,
   setMultiplayerWhiteTime,
   setMultiplayerBlackTime,
   onLocalGameOver,
+  isEngineOwner = true,
 }) => {
   const {
     playMoveSound,
@@ -136,6 +140,105 @@ const ChessBoard = ({
     playGameEndSound,
   ]);
 
+  const botColor =
+    gameMode === "bot"
+      ? playerColor === "white"
+        ? "b"
+        : playerColor === "black"
+          ? "w"
+          : null
+      : null;
+
+  // ── Mirror moves played for this bot game in another open browser tab ───
+  // (either the human's move from that tab, or that tab's Stockfish reply).
+  useEffect(() => {
+    if (gameMode !== "bot") return;
+
+    const handleBotMove = ({ move }) => {
+      const gameCopy = new Chess(game.fen());
+
+      try {
+        const fromPiece = gameCopy.get(move.from);
+        if (!fromPiece) {
+          console.warn("Ignored invalid synced bot move: source empty", move);
+          return;
+        }
+
+        const capturedPiece = gameCopy.get(move.to);
+        const result = gameCopy.move(move);
+
+        if (!result) {
+          console.warn("Ignored invalid synced bot move:", move);
+          return;
+        }
+
+        setMoves((prev) => [...prev, result.san]);
+        setLastMove({ from: move.from, to: move.to });
+
+        if (capturedPiece) {
+          addCapturedPiece(capturedPiece);
+        }
+
+        if (gameCopy.isGameOver()) {
+          playGameEndSound();
+        } else if (gameCopy.isCheck()) {
+          playCheckSound();
+        } else if (result.captured) {
+          playCaptureSound();
+        } else if (result.flags.includes("p")) {
+          playPromoteSound();
+        } else if (result.flags.includes("k") || result.flags.includes("q")) {
+          playCastleSound();
+        } else {
+          playMoveSound();
+        }
+
+        setGame(gameCopy);
+      } catch (err) {
+        console.warn("Ignored invalid synced bot move:", move, err);
+      }
+    };
+
+    socket.on("bot:move", handleBotMove);
+    return () => {
+      socket.off("bot:move", handleBotMove);
+    };
+  }, [
+    game,
+    gameMode,
+    setGame,
+    setMoves,
+    setLastMove,
+    addCapturedPiece,
+    playMoveSound,
+    playCaptureSound,
+    playCheckSound,
+    playCastleSound,
+    playPromoteSound,
+    playGameEndSound,
+  ]);
+
+  // ── Automate the bot's reply after each of the player's moves ────────────
+  useEffect(() => {
+    if (gameMode !== "bot" || !gameStarted || !botColor || !isEngineOwner)
+      return;
+
+    let cancelled = false;
+
+    triggerBotMove({
+      game,
+      gameMode,
+      gameStarted,
+      botColor,
+      makeMove,
+      isCancelled: () => cancelled,
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [game, gameMode, gameStarted, botColor, isEngineOwner]);
+
   function makeMove(move) {
     const gameCopy = new Chess(game.fen());
 
@@ -150,6 +253,8 @@ const ChessBoard = ({
 
         if (gameMode === "multiplayer") {
           socket.emit("move", { roomId, move });
+        } else if (gameMode === "bot") {
+          socket.emit("bot:move", { move });
         }
 
         if (capturedPiece) {
@@ -176,7 +281,13 @@ const ChessBoard = ({
             const finalMoves = [...moves, result.san];
             const finalFen = gameCopy.fen();
 
-            onLocalGameOver({ termination, winner, pgn: null, moves: finalMoves, fen: finalFen });
+            onLocalGameOver({
+              termination,
+              winner,
+              pgn: null,
+              moves: finalMoves,
+              fen: finalFen,
+            });
           }
         } else if (gameCopy.isCheck()) {
           playCheckSound();
@@ -204,6 +315,17 @@ const ChessBoard = ({
         return false;
       }
       if (piece[0].toLowerCase() !== multiplayerColor[0]) {
+        return false;
+      }
+    }
+
+    if (gameMode === "bot" && gameStarted) {
+      const expectedTurn = playerColor === "white" ? "w" : "b";
+      // Reject if it's not the player's turn, or they are dragging the wrong color
+      if (
+        game.turn() !== expectedTurn ||
+        piece[0].toLowerCase() !== expectedTurn
+      ) {
         return false;
       }
     }

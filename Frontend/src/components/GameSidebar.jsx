@@ -76,6 +76,9 @@ const GameSidebar = ({
   setBoardOrientation,
   botColorChoice,
   setBotColorChoice,
+  pendingBotGame,
+  handleContinueBotGame,
+  handleStartNewBotGame,
 }) => {
   const navigate = useNavigate();
   const [showShareMenu, setShowShareMenu] = useState(false);
@@ -160,6 +163,12 @@ const GameSidebar = ({
 
     if (gameMode === "multiplayer") {
       openMultiplayerLobby();
+      return;
+    }
+
+    // Logged-in users: always go through the same synced start used for "New Game"
+    if (isLoggedIn && handleStartNewBotGame) {
+      await handleStartNewBotGame();
       return;
     }
 
@@ -301,13 +310,32 @@ const GameSidebar = ({
               </div>
             )}
 
-            <div className="flex items-center gap-3 w-full">
-              <button
-                onClick={handleNewGame}
-                className="flex-1 py-3.5 px-5 text-base font-bold bg-emerald-600 hover:bg-emerald-500 transition rounded-xl shadow-md cursor-pointer"
-              >
-                New Game
-              </button>
+            <div className="flex items-center gap-2 w-full">
+              {pendingBotGame && gameMode === "bot" ? (
+                /* Display side-by-side when a pending game is detected */
+                <>
+                  <button
+                    onClick={handleContinueBotGame}
+                    className="flex-1 py-3.5 px-3 text-xs font-bold bg-purple-600 hover:bg-purple-500 transition rounded-xl shadow-md cursor-pointer text-white truncate"
+                  >
+                    Continue Game
+                  </button>
+                  <button
+                    onClick={handleStartNewBotGame}
+                    className="flex-1 py-3.5 px-3 text-xs font-bold bg-emerald-600 hover:bg-emerald-500 transition rounded-xl shadow-md cursor-pointer text-white truncate"
+                  >
+                    New Game
+                  </button>
+                </>
+              ) : (
+                /* Standard Single New Game Button */
+                <button
+                  onClick={handleNewGame}
+                  className="flex-1 py-3.5 px-5 text-base font-bold bg-emerald-600 hover:bg-emerald-500 transition rounded-xl shadow-md cursor-pointer"
+                >
+                  New Game
+                </button>
+              )}
 
               {gameMode === "multiplayer" ? (
                 /* Dynamic Status Pill detailing standard Chess.com classification split */

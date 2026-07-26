@@ -4,6 +4,8 @@ const { Chess } = require("chess.js");
 const jwt = require("jsonwebtoken");
 
 const rooms = {};
+
+const botGames = {};
 let io;
 
 // Parses the raw Cookie header string — no extra dep needed
@@ -34,6 +36,15 @@ function getGameType(base, increment) {
   if (total < 180) return "bullet";
   if (total < 600) return "blitz";
   return "rapid";
+}
+
+function getBotRoomName(userId) {
+  return `bot:${userId}`;
+}
+
+function cleanUpBotGame(userId, state) {
+  if (state?.cleanupTimeout) clearTimeout(state.cleanupTimeout);
+  delete botGames[userId];
 }
 
 function cleanUpRoom(roomId) {
@@ -236,6 +247,11 @@ const initializeSocket = (server) => {
 
   io.on("connection", (socket) => {
     console.log("User Connected:", socket.id);
+
+    const authedUserId = getUserIdFromSocket(socket);
+    if (authedUserId) {
+      socket.join(getBotRoomName(authedUserId));
+    }
 
     socket.on(
       "create-room",
@@ -511,6 +527,170 @@ const initializeSocket = (server) => {
       room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
     });
 
+    // ── BOT GAME SYNC ─────────────────────────────────────────────────────────
+    socket.on("bot:continue", ({ fen, moves, playerColor } = {}) => {
+      const userId = getUserIdFromSocket(socket);
+      if (!userId) return;
+
+      const roomName = getBotRoomName(userId);
+      socket.join(roomName);
+
+      let state = botGames[userId];
+      if (!state) {
+        state = botGames[userId] = {
+          fen: fen || new Chess().fen(),
+          moves: Array.isArray(moves) ? moves : [],
+          playerColor: playerColor === "black" ? "black" : "white",
+          gameStarted: true,
+          engineOwnerSocketId: null,
+          gameOverHandled: false,
+          cleanupTimeout: null,
+        };
+      }
+
+      if (state.cleanupTimeout) {
+        clearTimeout(state.cleanupTimeout);
+        state.cleanupTimeout = null;
+      }
+      state.gameOverHandled = false;
+      state.gameStarted = true;
+
+      // Only take over engine ownership if nobody currently connected holds it.
+      const currentOwner = state.engineOwnerSocketId
+        ? io.sockets.sockets.get(state.engineOwnerSocketId)
+        : null;
+      if (!currentOwner) {
+        state.engineOwnerSocketId = socket.id;
+      }
+
+      socket.emit("bot:sync-state", {
+        fen: state.fen,
+        moves: state.moves,
+        playerColor: state.playerColor,
+        gameStarted: state.gameStarted,
+      });
+
+      socket.emit("bot:engine-owner", {
+        isOwner: state.engineOwnerSocketId === socket.id,
+      });
+    });
+
+
+    socket.on("bot:move", ({ move } = {}) => {
+      const userId = getUserIdFromSocket(socket);
+      if (!userId || !move) return;
+
+      const state = botGames[userId];
+      if (!state) return;
+
+      try {
+        const chessCopy = new Chess(state.fen);
+        const result = chessCopy.move(move);
+        if (!result) return;
+
+        state.fen = chessCopy.fen();
+        state.moves.push(result.san);
+
+        socket.to(getBotRoomName(userId)).emit("bot:move", {
+          move,
+          san: result.san,
+          fen: state.fen,
+        });
+      } catch {}
+    });
+
+    // "New Game" clicked in any tab: resets the one shared session and
+    // broadcasts the fresh position to every tab (including the sender),
+    socket.on("bot:new-game", ({ playerColor } = {}) => {
+      const userId = getUserIdFromSocket(socket);
+      if (!userId) return;
+
+      const roomName = getBotRoomName(userId);
+      socket.join(roomName);
+
+      const previous = botGames[userId];
+      if (previous?.cleanupTimeout) clearTimeout(previous.cleanupTimeout);
+
+      const startingFen = new Chess().fen();
+      const normalizedColor = playerColor === "black" ? "black" : "white";
+
+      const state = (botGames[userId] = {
+        fen: startingFen,
+        moves: [],
+        playerColor: normalizedColor,
+        gameStarted: true,
+        engineOwnerSocketId: socket.id,
+        gameOverHandled: false,
+        cleanupTimeout: null,
+      });
+
+      io.to(roomName).emit("bot:new-game", {
+        fen: state.fen,
+        moves: state.moves,
+        playerColor: state.playerColor,
+        gameStarted: true,
+      });
+
+      const room = io.sockets.adapter.rooms.get(roomName);
+      if (room) {
+        for (const sid of room) {
+          io.to(sid).emit("bot:engine-owner", { isOwner: sid === socket.id });
+        }
+      }
+    });
+
+
+    socket.on("bot:game-over", (payload = {}, callback) => {
+      const userId = getUserIdFromSocket(socket);
+      if (!userId) {
+        if (typeof callback === "function") callback({ shouldPersist: true });
+        return;
+      }
+
+      const { termination, winner, fen, moves } = payload;
+
+      let state = botGames[userId];
+      if (!state) {
+        state = botGames[userId] = {
+          fen: fen || new Chess().fen(),
+          moves: Array.isArray(moves) ? moves : [],
+          playerColor: null,
+          gameStarted: false,
+          engineOwnerSocketId: null,
+          gameOverHandled: false,
+          cleanupTimeout: null,
+        };
+      }
+
+      if (state.gameOverHandled) {
+        if (typeof callback === "function") callback({ shouldPersist: false });
+        return;
+      }
+
+      state.gameOverHandled = true;
+      state.gameStarted = false;
+      if (typeof fen === "string") state.fen = fen;
+      if (Array.isArray(moves)) state.moves = moves;
+
+      if (typeof callback === "function") callback({ shouldPersist: true });
+
+      // Let every other open tab know the result too (e.g. a resignation
+      // or draw offer isn't derivable from the move list alone).
+      socket.to(getBotRoomName(userId)).emit("bot:game-ended", {
+        termination: termination || null,
+        winner: winner || null,
+        fen: state.fen,
+        moves: state.moves,
+      });
+
+      // Keep the finished session around briefly in case other tabs are
+      // mid-flight with their own "bot:game-over", then drop it.
+      if (state.cleanupTimeout) clearTimeout(state.cleanupTimeout);
+      state.cleanupTimeout = setTimeout(() => {
+        cleanUpBotGame(userId, state);
+      }, 15000);
+    });
+
     // ── reconnect-room: same-device path (localStorage) ─────────────────────
 
     socket.on("reconnect-room", ({ roomId, playerColor }) => {
@@ -669,6 +849,29 @@ const initializeSocket = (server) => {
 
     socket.on("disconnect", () => {
       console.log("User Disconnected:", socket.id);
+
+      // If this socket owned the Stockfish engine for a bot game, hand
+      // ownership to another still-open tab for the same user, if any.
+      // If no tab is left, ownership simply clears and the next tab to click "Continue Game" will take it.
+      const disconnectedUserId = getUserIdFromSocket(socket);
+      if (disconnectedUserId) {
+        const botState = botGames[disconnectedUserId];
+        if (botState && botState.engineOwnerSocketId === socket.id) {
+          const roomName = getBotRoomName(disconnectedUserId);
+          const room = io.sockets.adapter.rooms.get(roomName);
+          const remaining = room
+            ? Array.from(room).filter((sid) => sid !== socket.id)
+            : [];
+
+          if (remaining.length > 0) {
+            const [newOwnerId] = remaining;
+            botState.engineOwnerSocketId = newOwnerId;
+            io.to(newOwnerId).emit("bot:engine-owner", { isOwner: true });
+          } else {
+            botState.engineOwnerSocketId = null;
+          }
+        }
+      }
 
       for (const roomId in rooms) {
         const room = rooms[roomId];

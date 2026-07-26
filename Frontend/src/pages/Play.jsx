@@ -14,6 +14,11 @@ import { useAuth } from "../context/authContext";
 import useChessSounds from "../hooks/useChessSounds";
 
 import { createGame } from "../services/game.service";
+import {
+  getActiveBotGame,
+  saveActiveBotGame,
+  deleteActiveBotGame,
+} from "../services/activeBotGame.service";
 import { socket } from "../services/socket.service";
 import openings from "../data/openings";
 
@@ -82,6 +87,9 @@ const Play = () => {
 
   const [roomId, setRoomId] = useState("");
   const [multiplayerColor, setMultiplayerColor] = useState(null);
+  const [pendingBotGame, setPendingBotGame] = useState(null);
+
+  const [isEngineOwner, setIsEngineOwner] = useState(true);
   const [pendingReconnect, setPendingReconnect] = useState(false);
   const [pendingSessionReconnect, setPendingSessionReconnect] = useState(false);
   const sessionReconnectRetryRef = useRef(false);
@@ -505,6 +513,26 @@ const Play = () => {
     return false;
   };
 
+  // ── Standalone Bot Game Check on Mount ──────────────────────────────────────
+  useEffect(() => {
+    // Only check if user is logged in, no game is active, and it's bot mode
+    if (!user || gameStarted || pendingReconnect || pendingSessionReconnect || endgame.type)
+      return;
+
+    const checkActiveBotGame = async () => {
+      try {
+        const data = await getActiveBotGame();
+        if (data?.activeGame) {
+          setPendingBotGame(data.activeGame);
+        }
+      } catch (error) {
+        console.error("Failed to fetch active bot game:", error);
+      }
+    };
+
+    checkActiveBotGame();
+  }, [user, gameStarted, pendingReconnect, pendingSessionReconnect, endgame.type,]);
+
   // ── RECONNECT: player-reconnected / room-restored / room-restore-failed ────
 
   useEffect(() => {
@@ -555,7 +583,6 @@ const Play = () => {
       }
       setPendingSessionReconnect(false);
       setHasSessionRestorePending(false);
-      // No active game on the server — stay on the lobby/bot screen as normal
     };
 
     socket.on("session-game-found", handleSessionGameFound);
@@ -942,6 +969,12 @@ const Play = () => {
           });
         }
       }
+
+      if (!isMultiplayer) {
+        deleteActiveBotGame().catch((error) => {
+          console.error("Failed to clear active bot game:", error);
+        });
+      }
     } catch (error) {
       console.error(
         "Database tracking persist save transaction failed:",
@@ -949,6 +982,60 @@ const Play = () => {
       );
     }
   };
+
+  // ── Bot game end reporting (de-duplicated across open tabs) ────────────────
+
+  const reportBotGameOver = (result, termination, winner, whiteT, blackT) => {
+    const { user: currentUser, game: currentGame, moves: currentMoves } =
+      latestGameStateRef.current;
+
+    if (!currentUser || !socket.connected) {
+      saveGameToDatabase(result, termination, whiteT, blackT);
+      return;
+    }
+
+    let settled = false;
+    const fallbackTimer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      saveGameToDatabase(result, termination, whiteT, blackT);
+    }, 3000);
+
+    socket.emit(
+      "bot:game-over",
+      {
+        termination,
+        winner,
+        fen: currentGame.fen(),
+        moves: currentMoves,
+      },
+      (ack) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(fallbackTimer);
+        if (!ack || ack.shouldPersist !== false) {
+          saveGameToDatabase(result, termination, whiteT, blackT);
+        }
+      },
+    );
+  };
+
+  // ── Autosave the in-progress bot game (restorable on refresh / elsewhere) ──
+
+  useEffect(() => {
+    if (gameMode !== "bot") return;
+    if (!gameStarted) return;
+    if (isGameOver) return;
+    if (!user) return;
+
+    saveActiveBotGame({
+      fen: game.fen(),
+      moves,
+      playerColor,
+    }).catch((error) => {
+      console.error("Failed to autosave bot game:", error);
+    });
+  }, [game, moves, gameMode, gameStarted, isGameOver, playerColor, user]);
 
   // ── Game-over detection (local) ────────────────────────────────────────────
 
@@ -962,13 +1049,13 @@ const Play = () => {
       setEndgame({ type: "time", winner: "b" });
       setGameStarted(false);
       if (gameMode === "multiplayer") socket.emit("game-over", { roomId });
-      saveGameToDatabase("0-1", "timeout", 0, blackTime);
+      reportBotGameOver("0-1", "timeout", "b", 0, blackTime);
     } else if (blackFlagged) {
       setGameResult("🏆 White Wins on Time");
       setEndgame({ type: "time", winner: "w" });
       setGameStarted(false);
       if (gameMode === "multiplayer") socket.emit("game-over", { roomId });
-      saveGameToDatabase("1-0", "timeout", whiteTime, 0);
+      reportBotGameOver("1-0", "timeout", "w", whiteTime, 0);
     } else if (game.isCheckmate()) {
       const winnerColor = game.turn() === "w" ? "b" : "w";
       const winnerName = winnerColor === "w" ? "White" : "Black";
@@ -976,9 +1063,10 @@ const Play = () => {
       setEndgame({ type: "checkmate", winner: winnerColor });
       setGameStarted(false);
       if (gameMode === "multiplayer") socket.emit("game-over", { roomId });
-      saveGameToDatabase(
+      reportBotGameOver(
         winnerColor === "w" ? "1-0" : "0-1",
         "checkmate",
+        winnerColor,
         whiteTime,
         blackTime,
       );
@@ -987,15 +1075,16 @@ const Play = () => {
       setEndgame({ type: "draw", winner: null });
       setGameStarted(false);
       if (gameMode === "multiplayer") socket.emit("game-over", { roomId });
-      saveGameToDatabase("1/2-1/2", "stalemate", whiteTime, blackTime);
+      reportBotGameOver("1/2-1/2", "stalemate", null, whiteTime, blackTime);
     } else if (game.isInsufficientMaterial()) {
       setGameResult("🤝 Draw by Insufficient Material");
       setEndgame({ type: "draw", winner: null });
       setGameStarted(false);
       if (gameMode === "multiplayer") socket.emit("game-over", { roomId });
-      saveGameToDatabase(
+      reportBotGameOver(
         "1/2-1/2",
         "insufficient-material",
+        null,
         whiteTime,
         blackTime,
       );
@@ -1004,9 +1093,10 @@ const Play = () => {
       setEndgame({ type: "draw", winner: null });
       setGameStarted(false);
       if (gameMode === "multiplayer") socket.emit("game-over", { roomId });
-      saveGameToDatabase(
+      reportBotGameOver(
         "1/2-1/2",
         "threefold-repetition",
+        null,
         whiteTime,
         blackTime,
       );
@@ -1015,7 +1105,7 @@ const Play = () => {
       setEndgame({ type: "draw", winner: null });
       setGameStarted(false);
       if (gameMode === "multiplayer") socket.emit("game-over", { roomId });
-      saveGameToDatabase("1/2-1/2", "draw", whiteTime, blackTime);
+      reportBotGameOver("1/2-1/2", "draw", null, whiteTime, blackTime);
     } else if (moves.length === 0) {
       setGameResult("");
       setEndgame({ type: null, winner: null });
@@ -1059,9 +1149,10 @@ const Play = () => {
         return;
       }
 
-      saveGameToDatabase(
+      reportBotGameOver(
         winnerColor === "w" ? "1-0" : "0-1",
         "resignation",
+        winnerColor,
         whiteTime,
         blackTime,
       );
@@ -1073,7 +1164,7 @@ const Play = () => {
       }
       setGameResult("🤝 Draw by Mutual Agreement");
       setEndgame({ type: "draw", winner: null });
-      saveGameToDatabase("1/2-1/2", "draw", whiteTime, blackTime);
+      reportBotGameOver("1/2-1/2", "draw", null, whiteTime, blackTime);
     }
 
     chessSounds.playGameEndSound();
@@ -1111,7 +1202,14 @@ const Play = () => {
 
   // ── SERVER-BROADCASTED GAME END ─────────────────────────────────────────
   useEffect(() => {
-    const handleGameEnded = ({ termination, winner, pgn, moves, fen, whiteSocketId }) => {
+    const handleGameEnded = ({
+      termination,
+      winner,
+      pgn,
+      moves,
+      fen,
+      whiteSocketId,
+    }) => {
       setGameStarted(false);
       if (termination === "checkmate") {
         const winnerName = winner === "w" ? "White" : "Black";
@@ -1182,6 +1280,215 @@ const Play = () => {
     socket.on("rating-update", handleRatingUpdate);
     return () => socket.off("rating-update", handleRatingUpdate);
   }, []);
+
+  // ── BOT GAME SYNC (multi-browser) ───────────────────────────────────────
+
+  useEffect(() => {
+
+    const handleBotSyncState = (state) => {
+      if (!state) return;
+      const restoredGame = new Chess(state.fen || new Chess().fen());
+      setGame(restoredGame);
+      setBoardKey((prev) => prev + 1);
+      setMoves(state.moves || []);
+      setLastMove(null);
+      if (state.playerColor) {
+        setPlayerColor(state.playerColor);
+        setBoardOrientation(state.playerColor);
+        setBotColorChoice(state.playerColor);
+      }
+      setGameMode("bot");
+      setGameStarted(!!state.gameStarted);
+      setEndgame({ type: null, winner: null });
+      setGameResult("");
+      setPendingBotGame(null);
+    };
+
+    const handleBotNewGame = (state) => {
+      resetClock();
+      resetCapturedPieces();
+      setGame(new Chess(state?.fen || new Chess().fen()));
+      setBoardKey((prev) => prev + 1);
+      setMoves([]);
+      setLastMove(null);
+      if (state?.playerColor) {
+        setPlayerColor(state.playerColor);
+        setBoardOrientation(state.playerColor);
+        setBotColorChoice(state.playerColor);
+      }
+      setGameMode("bot");
+      setEndgame({ type: null, winner: null });
+      setGameResult("");
+      setPendingBotGame(null);
+      setGameStarted(true);
+      hasSavedGameRef.current = false;
+
+      try {
+        chessSounds.playGameStartSound();
+      } catch (error) {
+        console.warn("Autoplay blocked until user interacts with document.");
+      }
+    };
+
+    const handleEngineOwner = ({ isOwner } = {}) => {
+      setIsEngineOwner(!!isOwner);
+    };
+
+
+    const handleBotGameEnded = ({
+      termination,
+      winner,
+      fen,
+      moves: finalMoves,
+    } = {}) => {
+      if (typeof fen === "string") {
+        setGame(new Chess(fen));
+        setBoardKey((prev) => prev + 1);
+      }
+      if (Array.isArray(finalMoves)) setMoves(finalMoves);
+      setGameStarted(false);
+
+      if (termination === "checkmate") {
+        const winnerName = winner === "w" ? "White" : "Black";
+        setGameResult(`🏆 ${winnerName} Wins by Checkmate`);
+        setEndgame({ type: "checkmate", winner });
+      } else if (termination === "resignation") {
+        const winnerName = winner === "w" ? "White" : "Black";
+        setGameResult(`🏆 ${winnerName} Wins by Resignation`);
+        setEndgame({ type: "resignation", winner });
+      } else if (termination === "timeout") {
+        const winnerName = winner === "w" ? "White" : "Black";
+        setGameResult(`🏆 ${winnerName} Wins on Time`);
+        setEndgame({ type: "time", winner });
+      } else if (termination === "stalemate") {
+        setGameResult("🤝 Draw by Stalemate");
+        setEndgame({ type: "draw", winner: null });
+      } else if (termination === "insufficient-material") {
+        setGameResult("🤝 Draw by Insufficient Material");
+        setEndgame({ type: "draw", winner: null });
+      } else if (termination === "threefold-repetition") {
+        setGameResult("🤝 Draw by Repetition");
+        setEndgame({ type: "draw", winner: null });
+      } else {
+        setGameResult("🤝 Draw");
+        setEndgame({ type: "draw", winner: null });
+      }
+
+      chessSounds.playGameEndSound();
+    };
+
+    socket.on("bot:sync-state", handleBotSyncState);
+    socket.on("bot:new-game", handleBotNewGame);
+    socket.on("bot:engine-owner", handleEngineOwner);
+    socket.on("bot:game-ended", handleBotGameEnded);
+
+    return () => {
+      socket.off("bot:sync-state", handleBotSyncState);
+      socket.off("bot:new-game", handleBotNewGame);
+      socket.off("bot:engine-owner", handleEngineOwner);
+      socket.off("bot:game-ended", handleBotGameEnded);
+    };
+  }, [chessSounds]);
+
+  // Re-announce this tab to the shared bot session whenever the socket
+  // (re)connects mid-game (refresh, brief network drop) — mirrors the
+  // multiplayer "reconnect-room" behaviour above.
+  useEffect(() => {
+    if (gameMode !== "bot" || !gameStarted || !user) return;
+
+    const handleReconnect = () => {
+      const {
+        game: currentGame,
+        moves: currentMoves,
+        playerColor: currentPlayerColor,
+      } = latestGameStateRef.current;
+
+      socket.emit("bot:continue", {
+        fen: currentGame.fen(),
+        moves: currentMoves,
+        playerColor: currentPlayerColor,
+      });
+    };
+
+    socket.on("connect", handleReconnect);
+    return () => socket.off("connect", handleReconnect);
+  }, [gameMode, gameStarted, user]);
+
+  // Bot-games handling
+
+  const handleContinueBotGame = () => {
+    const activeGame = pendingBotGame;
+    if (!activeGame) return;
+
+    const restoredGame = new Chess(activeGame.fen || new Chess().fen());
+    setGame(restoredGame);
+    setBoardKey((prev) => prev + 1);
+    setMoves(activeGame.moves || []);
+    setLastMove(null);
+    setPlayerColor(activeGame.playerColor);
+    setBoardOrientation(activeGame.playerColor);
+    setBotColorChoice(activeGame.playerColor);
+    setGameMode("bot");
+    setEndgame({ type: null, winner: null });
+    setGameResult("");
+    setGameStarted(true);
+    setPendingBotGame(null);
+
+    if (socket.connected) {
+      socket.emit("bot:continue", {
+        fen: activeGame.fen,
+        moves: activeGame.moves || [],
+        playerColor: activeGame.playerColor,
+      });
+    }
+
+    try {
+      chessSounds.playGameStartSound();
+    } catch (error) {
+      console.warn("Autoplay blocked until user interacts with document.");
+    }
+  };
+
+  // ── Handler to erase pending game & start a brand new game ───────────────
+  const handleStartNewBotGame = async () => {
+    try {
+      // Delete from DB
+      await deleteActiveBotGame();
+      setPendingBotGame(null);
+
+      const resolvedColor =
+        botColorChoice === "random"
+          ? Math.random() < 0.5
+            ? "white"
+            : "black"
+          : botColorChoice;
+
+      if (user && socket.connected) {
+        socket.emit("bot:new-game", { playerColor: resolvedColor });
+        return;
+      }
+
+      // Fallback for guests / a dropped socket: reset locally only.
+      setPlayerColor(resolvedColor);
+      setBoardOrientation(resolvedColor);
+      resetClock();
+      setGame(new Chess());
+      setMoves([]);
+      resetCapturedPieces();
+      setGameMode("bot");
+      setEndgame({ type: null, winner: null });
+      setGameResult("");
+      setGameStarted(true);
+
+      try {
+        chessSounds.playGameStartSound();
+      } catch (error) {
+        console.warn("Autoplay blocked until user interacts with document.");
+      }
+    } catch (err) {
+      console.error("Failed to start new bot game:", err);
+    }
+  };
 
   if (authLoading) {
     return (
@@ -1277,11 +1584,14 @@ const Play = () => {
               setLastMove={setLastMove}
               endgame={endgame}
               gameMode={gameMode}
+              gameStarted={gameStarted}
+              playerColor={playerColor}
               roomId={roomId}
               multiplayerColor={multiplayerColor}
               setMultiplayerWhiteTime={setMultiplayerWhiteTime}
               setMultiplayerBlackTime={setMultiplayerBlackTime}
               onLocalGameOver={handleLocalGameOver}
+              isEngineOwner={isEngineOwner}
             />
           </div>
 
@@ -1370,6 +1680,9 @@ const Play = () => {
             declineDrawOffer={declineDrawOffer}
             isRated={isRated}
             setIsRated={setIsRated}
+            pendingBotGame={pendingBotGame}
+            handleContinueBotGame={handleContinueBotGame}
+            handleStartNewBotGame={handleStartNewBotGame}
           />
         </div>
       </div>
