@@ -27,7 +27,7 @@ const getActiveBotGame = async (req, res) => {
  */
 const saveActiveBotGame = async (req, res) => {
   try {
-    const { fen, moves, playerColor } = req.body;
+    const { fen, moves, playerColor, difficulty } = req.body;
 
     if (!fen)
       return res
@@ -46,6 +46,7 @@ const saveActiveBotGame = async (req, res) => {
         fen,
         moves: Array.isArray(moves) ? moves : [],
         playerColor,
+        ...(typeof difficulty === "string" && difficulty && { difficulty }),
       },
       { upsert: true, new: true, setDefaultsOnInsert: true },
     );

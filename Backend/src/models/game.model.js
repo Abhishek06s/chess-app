@@ -137,6 +137,13 @@ const gameSchema = new mongoose.Schema(
       default: "Stockfish Bot",
     },
 
+    // Difficulty tier the bot played at, only set for opponentType "bot".
+    botDifficulty: {
+      key: { type: String, default: undefined },
+      label: { type: String, default: undefined },
+      elo: { type: Number, default: undefined },
+    },
+
     rated: {
       type: Boolean,
       default: false,

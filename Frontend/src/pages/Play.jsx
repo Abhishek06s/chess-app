@@ -21,6 +21,10 @@ import {
 } from "../services/activeBotGame.service";
 import { socket } from "../services/socket.service";
 import openings from "../data/openings";
+import {
+  DEFAULT_BOT_DIFFICULTY_KEY,
+  getBotDifficulty,
+} from "../utils/botDifficulty";
 
 const getBannerConfig = (resultString) => {
   if (resultString.includes("Wins")) {
@@ -75,6 +79,9 @@ const Play = () => {
   const [boardOrientation, setBoardOrientation] = useState("white");
 
   const [botColorChoice, setBotColorChoice] = useState("white");
+  const [botDifficulty, setBotDifficulty] = useState(
+    DEFAULT_BOT_DIFFICULTY_KEY,
+  );
   const [boardKey, setBoardKey] = useState(0);
   const [gameStarted, setGameStarted] = useState(false);
   const [lastMove, setLastMove] = useState(null);
@@ -153,6 +160,7 @@ const Play = () => {
       timeControl,
       gameType,
       isRated,
+      botDifficulty,
     };
   });
 
@@ -869,6 +877,7 @@ const Play = () => {
       timeControl: currentTimeControl,
       gameType: currentGameType,
       isRated: currentIsRated,
+      botDifficulty: currentBotDifficulty,
     } = latestGameStateRef.current;
 
     if (!currentUser) return;
@@ -969,6 +978,12 @@ const Play = () => {
         termination,
         status,
         roomId: isMultiplayer ? currentRoomId : undefined,
+        ...(finalOpponentType === "bot" && {
+          botDifficulty: (() => {
+            const tier = getBotDifficulty(currentBotDifficulty);
+            return { key: tier.key, label: tier.label, elo: tier.elo };
+          })(),
+        }),
       });
 
       if (response?.ratingChanges) {
@@ -1099,10 +1114,20 @@ const Play = () => {
       fen: game.fen(),
       moves,
       playerColor,
+      difficulty: botDifficulty,
     }).catch((error) => {
       console.error("Failed to autosave bot game:", error);
     });
-  }, [game, moves, gameMode, gameStarted, isGameOver, playerColor, user]);
+  }, [
+    game,
+    moves,
+    gameMode,
+    gameStarted,
+    isGameOver,
+    playerColor,
+    user,
+    botDifficulty,
+  ]);
 
   // ── Game-over detection (local) ────────────────────────────────────────────
 
@@ -1495,6 +1520,7 @@ const Play = () => {
     setPlayerColor(activeGame.playerColor);
     setBoardOrientation(activeGame.playerColor);
     setBotColorChoice(activeGame.playerColor);
+    setBotDifficulty(activeGame.difficulty || DEFAULT_BOT_DIFFICULTY_KEY);
     setGameMode("bot");
     setEndgame({ type: null, winner: null });
     setGameResult("");
@@ -1590,14 +1616,14 @@ const Play = () => {
                     ? whitePlayerName
                     : blackPlayerName
                   : "Searching for Opponent..."
-                : `Bot (${topCardColor === "white" ? "White" : "Black"})`
+                : `${getBotDifficulty(botDifficulty).label} Bot (${topCardColor === "white" ? "White" : "Black"})`
             }
             rating={
               gameMode === "multiplayer"
                 ? topCardColor === "white"
                   ? whitePlayerRating
                   : blackPlayerRating
-                : 1500
+                : getBotDifficulty(botDifficulty).elo
             }
             ratingChange={
               topCardColor === "white" ? whiteRatingChange : blackRatingChange
@@ -1663,6 +1689,7 @@ const Play = () => {
               setMultiplayerBlackTime={setMultiplayerBlackTime}
               onLocalGameOver={handleLocalGameOver}
               isEngineOwner={isEngineOwner}
+              botDifficulty={botDifficulty}
             />
           </div>
 
@@ -1715,7 +1742,7 @@ const Play = () => {
           />
         </div>
 
-        <div className="bg-zinc-900 rounded-2xl border border-white/10 p-6 shadow-xl h-165">
+        <div className="bg-zinc-900 rounded-2xl border border-white/10 p-6 shadow-xl h-202">
           <GameSidebar
             moves={moves}
             game={game}
@@ -1744,6 +1771,8 @@ const Play = () => {
             setBoardOrientation={setBoardOrientation}
             botColorChoice={botColorChoice}
             setBotColorChoice={setBotColorChoice}
+            botDifficulty={botDifficulty}
+            setBotDifficulty={setBotDifficulty}
             openMultiplayerLobby={() => setShowMultiplayerLobby(true)}
             incomingDrawOffer={incomingDrawOffer}
             drawOfferPending={drawOfferPending}

@@ -397,6 +397,18 @@ const Profile = () => {
                                 )}
                               </div>
 
+                              {isBotGame && game.botDifficulty?.label && (
+                                <div className="flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md border bg-purple-500/10 text-purple-400 border-purple-500/20">
+                                  <Target className="w-3 h-3" />
+                                  <span>
+                                    {game.botDifficulty.label}
+                                    {game.botDifficulty.elo
+                                      ? ` (${game.botDifficulty.elo})`
+                                      : ""}
+                                  </span>
+                                </div>
+                              )}
+
                               <span className="text-zinc-400 text-sm font-medium">
                                 vs
                               </span>

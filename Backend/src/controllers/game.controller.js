@@ -21,6 +21,7 @@ const createGame = async (req, res) => {
       blackTimeRemaining,
       opponentType,
       opponentName,
+      botDifficulty,
       rated,
       termination,
       status,
@@ -118,6 +119,14 @@ const createGame = async (req, res) => {
         }),
         opponentType,
         opponentName,
+        ...(opponentType === "bot" &&
+          botDifficulty && {
+            botDifficulty: {
+              key: botDifficulty.key,
+              label: botDifficulty.label,
+              elo: botDifficulty.elo,
+            },
+          }),
         rated: opponentType === "bot" ? false : !!rated,
         termination,
         status,

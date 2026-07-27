@@ -4,6 +4,7 @@ import { Chessboard } from "react-chessboard";
 import useChessSounds from "../hooks/useChessSounds";
 import { socket } from "../services/socket.service";
 import { triggerBotMove } from "../services/bot.service";
+import { getBotDifficulty } from "../utils/botDifficulty";
 import { Crown, Flag, Timer } from "lucide-react";
 
 const ChessBoard = ({
@@ -25,6 +26,7 @@ const ChessBoard = ({
   setMultiplayerBlackTime,
   onLocalGameOver,
   isEngineOwner = true,
+  botDifficulty,
 }) => {
   const {
     playMoveSound,
@@ -225,6 +227,8 @@ const ChessBoard = ({
 
     let cancelled = false;
 
+    const { elo, depth, limitStrength } = getBotDifficulty(botDifficulty);
+
     triggerBotMove({
       game,
       gameMode,
@@ -232,12 +236,15 @@ const ChessBoard = ({
       botColor,
       makeMove,
       isCancelled: () => cancelled,
+      elo,
+      depth,
+      limitStrength,
     });
 
     return () => {
       cancelled = true;
     };
-  }, [game, gameMode, gameStarted, botColor, isEngineOwner]);
+  }, [game, gameMode, gameStarted, botColor, isEngineOwner, botDifficulty]);
 
   function makeMove(move) {
     const gameCopy = new Chess(game.fen());

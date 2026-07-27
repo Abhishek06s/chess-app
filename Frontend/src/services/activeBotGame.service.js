@@ -5,8 +5,18 @@ export const getActiveBotGame = async () => {
   return response.data;
 };
 
-export const saveActiveBotGame = async ({ fen, moves, playerColor }) => {
-  const response = await api.put("/bot-games", { fen, moves, playerColor });
+export const saveActiveBotGame = async ({
+  fen,
+  moves,
+  playerColor,
+  difficulty,
+}) => {
+  const response = await api.put("/bot-games", {
+    fen,
+    moves,
+    playerColor,
+    difficulty,
+  });
   return response.data;
 };
 

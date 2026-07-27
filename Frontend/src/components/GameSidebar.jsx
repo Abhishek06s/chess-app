@@ -19,6 +19,7 @@ import { useNavigate } from "react-router-dom";
 
 import useChessSounds from "../hooks/useChessSounds";
 import { TIME_PRESETS } from "../utils/timeControls";
+import { BOT_DIFFICULTIES } from "../utils/botDifficulty";
 
 export const BulletIcon = ({ className = "w-4 h-4", ...props }) => {
   return (
@@ -76,6 +77,8 @@ const GameSidebar = ({
   setBoardOrientation,
   botColorChoice,
   setBotColorChoice,
+  botDifficulty,
+  setBotDifficulty,
   pendingBotGame,
   handleContinueBotGame,
   handleStartNewBotGame,
@@ -86,6 +89,8 @@ const GameSidebar = ({
 
   const [activeCategory, setActiveCategory] = useState("rapid");
   const [customMinutes, setCustomMinutes] = useState("10");
+  const [customBaseSeconds, setCustomBaseSeconds] = useState("30");
+  const [customBaseUnit, setCustomBaseUnit] = useState("minutes"); // "minutes" | "seconds"
   const [customIncrement, setCustomIncrement] = useState("5");
 
   const gameStartSound = useChessSounds().playGameStartSound;
@@ -97,15 +102,29 @@ const GameSidebar = ({
     return "Rapid";
   };
 
-  const currentFormatLabel = `${Math.floor(timeControl.base / 60)}+${timeControl.increment}`;
+  const currentFormatLabel =
+    timeControl.base < 60
+      ? `${timeControl.base}s+${timeControl.increment}`
+      : `${Math.floor(timeControl.base / 60)}+${timeControl.increment}`;
   const currentCategoryPool = getChessComCategory(
     timeControl.base,
     timeControl.increment,
   );
 
   const previewMins = Math.max(1, parseInt(customMinutes, 10) || 1);
+  const previewBaseSecondsValue = Math.min(
+    59,
+    Math.max(10, parseInt(customBaseSeconds, 10) || 10),
+  );
+  const previewBaseTotalSeconds =
+    customBaseUnit === "seconds"
+      ? previewBaseSecondsValue
+      : previewMins * 60;
   const previewInc = Math.max(0, parseInt(customIncrement, 10) || 0);
-  const previewCategoryPool = getChessComCategory(previewMins * 60, previewInc);
+  const previewCategoryPool = getChessComCategory(
+    previewBaseTotalSeconds,
+    previewInc,
+  );
 
   const openAnalysis = () => {
     const tempGame = new Chess();
@@ -200,9 +219,13 @@ const GameSidebar = ({
   };
 
   const applyCustomTime = () => {
-    setTimeControl({ base: previewMins * 60, increment: previewInc });
+    setTimeControl({ base: previewBaseTotalSeconds, increment: previewInc });
+    const baseLabel =
+      customBaseUnit === "seconds"
+        ? `${previewBaseSecondsValue}s`
+        : `${previewMins} min`;
     toast.success(
-      `Custom setup applied: ${previewMins} min | ${previewInc}s (${previewCategoryPool})`,
+      `Custom setup applied: ${baseLabel} | ${previewInc}s (${previewCategoryPool})`,
     );
   };
 
@@ -374,6 +397,36 @@ const GameSidebar = ({
               )}
             </div>
 
+            {gameMode === "bot" && (
+              /* Bot Mode: choose the engine's difficulty for the next game.
+                 (Continuing a pending game keeps whatever difficulty it was
+                 originally started with, restored from the saved record.) */
+              <div className="space-y-2">
+                <h3 className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 pl-1">
+                  Bot Difficulty
+                </h3>
+                <div className="grid grid-cols-3 grid-rows-2 gap-2">
+                  {BOT_DIFFICULTIES.map((tier) => (
+                    <button
+                      key={tier.key}
+                      type="button"
+                      onClick={() => setBotDifficulty(tier.key)}
+                      className={`flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 rounded-xl border transition cursor-pointer text-xs font-semibold ${
+                        botDifficulty === tier.key
+                          ? "bg-purple-600/10 border-purple-500 text-purple-400"
+                          : "bg-zinc-800/40 border-white/5 hover:bg-zinc-800 text-zinc-300"
+                      }`}
+                    >
+                      <span>{tier.label}</span>
+                      <span className="text-[10px] font-mono text-zinc-500">
+                        {tier.elo} Elo
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {gameMode === "bot" ? (
               /* Bot Mode: choose which side the human plays */
               <div className="space-y-2">
@@ -478,17 +531,56 @@ const GameSidebar = ({
                   <div className="p-3 bg-zinc-950/40 border border-white/5 rounded-xl space-y-3">
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-1">
-                          Base (Mins)
-                        </label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="180"
-                          value={customMinutes}
-                          onChange={(e) => setCustomMinutes(e.target.value)}
-                          className="w-full bg-zinc-900 border border-white/10 rounded-lg p-2 text-xs text-center text-white focus:outline-none focus:border-purple-500 font-mono"
-                        />
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[10px] uppercase font-bold tracking-wider text-zinc-500">
+                            Base
+                          </label>
+                          <div className="flex gap-0.5 bg-zinc-900 border border-white/10 rounded-md p-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setCustomBaseUnit("minutes")}
+                              className={`px-1.5 py-0.5 text-[9px] font-bold uppercase rounded cursor-pointer transition ${
+                                customBaseUnit === "minutes"
+                                  ? "bg-purple-600 text-white"
+                                  : "text-zinc-500 hover:text-zinc-300"
+                              }`}
+                            >
+                              Min
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCustomBaseUnit("seconds")}
+                              className={`px-1.5 py-0.5 text-[9px] font-bold uppercase rounded cursor-pointer transition ${
+                                customBaseUnit === "seconds"
+                                  ? "bg-purple-600 text-white"
+                                  : "text-zinc-500 hover:text-zinc-300"
+                              }`}
+                            >
+                              Sec
+                            </button>
+                          </div>
+                        </div>
+                        {customBaseUnit === "minutes" ? (
+                          <input
+                            type="number"
+                            min="1"
+                            max="180"
+                            value={customMinutes}
+                            onChange={(e) => setCustomMinutes(e.target.value)}
+                            className="w-full bg-zinc-900 border border-white/10 rounded-lg p-2 text-xs text-center text-white focus:outline-none focus:border-purple-500 font-mono"
+                          />
+                        ) : (
+                          <input
+                            type="number"
+                            min="10"
+                            max="59"
+                            value={customBaseSeconds}
+                            onChange={(e) =>
+                              setCustomBaseSeconds(e.target.value)
+                            }
+                            className="w-full bg-zinc-900 border border-white/10 rounded-lg p-2 text-xs text-center text-white focus:outline-none focus:border-purple-500 font-mono"
+                          />
+                        )}
                       </div>
                       <div>
                         <label className="block text-[10px] uppercase font-bold tracking-wider text-zinc-500 mb-1">
@@ -562,7 +654,7 @@ const GameSidebar = ({
         </h3>
         <div
           ref={movesContainerRef}
-          className="bg-zinc-950/60 border border-white/10 rounded-xl p-2 max-h-56 overflow-y-auto space-y-0.5 flex-1 shadow-inner custom-scrollbar"
+          className="bg-zinc-950/60 border border-white/10 rounded-xl p-2 max-h-100 overflow-y-auto space-y-0.5 flex-1 shadow-inner custom-scrollbar"
         >
           {moves.length === 0 ? (
             <div className="h-full flex items-center justify-center p-4">
@@ -595,8 +687,14 @@ const GameSidebar = ({
       {isMatchRunning && (
         <div className="bg-zinc-950/40 border border-white/10 rounded-xl p-3 space-y-3 shadow-md">
           <div className="flex items-center justify-between px-2 py-1 text-xs font-semibold text-zinc-500 tracking-wide uppercase border-b border-white/5">
-            <span>
+            <span className="flex items-center gap-1.5">
               {gameMode === "multiplayer" ? "Live Pool Tier" : "Playing vs Bot"}
+              {gameMode === "bot" && (
+                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 bg-purple-500/10 border border-purple-500/20 px-1.5 py-0.5 rounded normal-case">
+                  {BOT_DIFFICULTIES.find((tier) => tier.key === botDifficulty)
+                    ?.label || "Medium"}
+                </span>
+              )}
             </span>
             <div className="flex items-center gap-2">
               {gameMode === "multiplayer" && (
@@ -654,7 +752,7 @@ const GameSidebar = ({
             )}
 
             {/* Draw — multiplayer only */}
-            {gameMode === "multiplayer" ? (
+            {gameMode === "multiplayer" && moves.length > 1 ? (
               <button
                 onClick={() => onGameAction("draw")}
                 className="flex flex-col items-center gap-1 py-3 px-2 bg-zinc-800 hover:bg-zinc-750 transition border border-white/10 rounded-xl text-xs font-semibold text-zinc-300 shadow-sm cursor-pointer"

@@ -29,6 +29,11 @@ const activeBotGameSchema = new mongoose.Schema(
       enum: ["white", "black"],
       required: true,
     },
+
+    difficulty: {
+      type: String,
+      default: "medium",
+    },
   },
   {
     timestamps: true,

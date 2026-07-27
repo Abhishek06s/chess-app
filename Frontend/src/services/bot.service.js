@@ -1,7 +1,7 @@
 import { Chess } from "chess.js";
 
 let engine = null;
-let engineReady = null; 
+let engineReady = null; // Promise that resolves once the UCI handshake is done
 
 const queue = [];
 let isThinking = false;
@@ -12,6 +12,22 @@ const MAX_ELO = 2900;
 
 const MIN_THINK_MS = 500;
 const MAX_THINK_MS = 1000;
+
+// --- Generic "wait for a specific engine response line" plumbing ---------
+//
+// Stockfish (like any UCI engine) is asynchronous: sending "uci" doesn't
+// mean it's initialized, and sending "setoption" doesn't mean the option
+// has been applied. The protocol's way of confirming this is:
+//   uci        -> wait for "uciok"
+//   setoption  -> (any number of these)
+//   isready    -> wait for "readyok"
+// Only after "readyok" is it safe to trust that previously-sent options
+// (like UCI_Elo) have actually taken effect. The previous version of this
+// file fired setoption/position/go back-to-back with no such wait, which
+// meant UCI_Elo sometimes hadn't been applied yet when "go" was sent -
+// causing the bot to occasionally search at full strength (finding only
+// moves to mate) and occasionally at the intended weak strength (hanging
+// pieces), inconsistently from move to move.
 
 let pendingWaits = [];
 
@@ -48,6 +64,10 @@ function createEngineWorker() {
   return worker;
 }
 
+// Lazily creates the engine and performs the full UCI init handshake:
+// uci -> uciok -> setoption(s) -> isready -> readyok.
+// Safe to call repeatedly; concurrent callers all await the same
+// in-flight init promise instead of re-running the handshake.
 async function getEngine() {
   if (engine && engineReady) {
     await engineReady;
@@ -61,8 +81,9 @@ async function getEngine() {
     engine.postMessage("uci");
     await uciOk;
 
-    engine.postMessage("setoption name UCI_LimitStrength value true");
-
+    // Strength-related options (UCI_LimitStrength / UCI_Elo) are sent fresh
+    // before every move in processQueue() instead of once here, since the
+    // difficulty can change from one game to the next on this same worker.
     const readyOk = waitForLine((line) => line === "readyok");
     engine.postMessage("isready");
     await readyOk;
@@ -86,7 +107,7 @@ async function processQueue() {
   if (isThinking || queue.length === 0) return;
   isThinking = true;
 
-  const { fen, elo, depth, resolve, reject } = queue[0];
+  const { fen, elo, depth, limitStrength, resolve, reject } = queue[0];
 
   try {
     const chess = new Chess(fen);
@@ -99,8 +120,13 @@ async function processQueue() {
 
     const worker = await getEngine();
     const startedAt = Date.now();
-    
-    worker.postMessage(`setoption name UCI_Elo value ${clampElo(elo)}`);
+
+    worker.postMessage(
+      `setoption name UCI_LimitStrength value ${limitStrength ? "true" : "false"}`,
+    );
+    if (limitStrength) {
+      worker.postMessage(`setoption name UCI_Elo value ${clampElo(elo)}`);
+    }
     const readyOk = waitForLine((line) => line === "readyok");
     worker.postMessage("isready");
     await readyOk;
@@ -160,9 +186,12 @@ async function processQueue() {
  * Resolves to { from, to, promotion, san } or null if there's no
  * legal move to make (checkmate/stalemate/etc).
  */
-export function requestBotMove(fen, { elo = DEFAULT_ELO, depth = 14 } = {}) {
+export function requestBotMove(
+  fen,
+  { elo = DEFAULT_ELO, depth = 14, limitStrength = true } = {},
+) {
   return new Promise((resolve, reject) => {
-    queue.push({ fen, elo, depth, resolve, reject });
+    queue.push({ fen, elo, depth, limitStrength, resolve, reject });
     processQueue();
   });
 }
@@ -187,6 +216,8 @@ export function requestBotMove(fen, { elo = DEFAULT_ELO, depth = 14 } = {}) {
  *   reset or left while the engine was still thinking).
  * @param {number} [params.elo]
  * @param {number} [params.depth]
+ * @param {boolean} [params.limitStrength] - set false to run the engine
+ *   fully unrestricted (used by the "Invincible" difficulty tier).
  */
 
 export async function triggerBotMove({
@@ -198,6 +229,7 @@ export async function triggerBotMove({
   isCancelled,
   elo = DEFAULT_ELO,
   depth = 14,
+  limitStrength = true,
 } = {}) {
   if (gameMode !== "bot") return null;
   if (!gameStarted) return null;
@@ -206,7 +238,7 @@ export async function triggerBotMove({
   if (game.isGameOver()) return null;
   if (game.turn() !== botColor) return null;
 
-  const move = await requestBotMove(game.fen(), { elo, depth });
+  const move = await requestBotMove(game.fen(), { elo, depth, limitStrength });
   if (!move) return null;
   if (typeof isCancelled === "function" && isCancelled()) return null;
 
@@ -224,8 +256,8 @@ export function stopBot() {
   if (engine) {
     engine.postMessage("stop");
   }
-  
-  
+  // Resolve anything still waiting so callers of requestBotMove don't hang,
+  // then drop the queue and any in-flight response listeners.
   queue.forEach((item) => item.resolve(null));
   queue.length = 0;
   isThinking = false;
