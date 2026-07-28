@@ -227,7 +227,15 @@ const ChessBoard = ({
 
     let cancelled = false;
 
-    const { elo, depth, limitStrength } = getBotDifficulty(botDifficulty);
+    const {
+      depth,
+      multiPV,
+      mistakeChance,
+      maxCentipawnLoss,
+      mistakeSoftening,
+      mistakesOnlyWhenComplex,
+      complexityThreshold,
+    } = getBotDifficulty(botDifficulty);
 
     triggerBotMove({
       game,
@@ -236,9 +244,13 @@ const ChessBoard = ({
       botColor,
       makeMove,
       isCancelled: () => cancelled,
-      elo,
       depth,
-      limitStrength,
+      multiPV,
+      mistakeChance,
+      maxCentipawnLoss,
+      mistakeSoftening,
+      mistakesOnlyWhenComplex,
+      complexityThreshold,
     });
 
     return () => {

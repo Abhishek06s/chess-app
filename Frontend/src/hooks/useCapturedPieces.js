@@ -28,6 +28,13 @@ const useCapturedPieces = (fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w 
     });
   };
 
+  const restoreCapturedPieces = (pieces) => {
+    setCapturedPieces({
+      white: Array.isArray(pieces?.white) ? pieces.white : [],
+      black: Array.isArray(pieces?.black) ? pieces.black : [],
+    });
+  };
+
   const groupPieces = (pieces) => {
     const grouped = {};
     pieces.forEach((piece) => {
@@ -66,6 +73,7 @@ const useCapturedPieces = (fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w 
     capturedPieces,
     addCapturedPiece,
     resetCapturedPieces,
+    restoreCapturedPieces,
     whiteAdvantage,
     blackAdvantage,
     groupedWhitePieces,

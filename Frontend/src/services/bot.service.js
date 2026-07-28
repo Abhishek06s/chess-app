@@ -6,10 +6,6 @@ let engineReady = null; // Promise that resolves once the UCI handshake is done
 const queue = [];
 let isThinking = false;
 
-const DEFAULT_ELO = 1500;
-const MIN_ELO = 400;
-const MAX_ELO = 2900;
-
 const MIN_THINK_MS = 500;
 const MAX_THINK_MS = 1000;
 
@@ -22,17 +18,22 @@ const MAX_THINK_MS = 1000;
 //   setoption  -> (any number of these)
 //   isready    -> wait for "readyok"
 // Only after "readyok" is it safe to trust that previously-sent options
-// (like UCI_Elo) have actually taken effect. The previous version of this
-// file fired setoption/position/go back-to-back with no such wait, which
-// meant UCI_Elo sometimes hadn't been applied yet when "go" was sent -
-// causing the bot to occasionally search at full strength (finding only
-// moves to mate) and occasionally at the intended weak strength (hanging
-// pieces), inconsistently from move to move.
+// (like MultiPV) have actually taken effect.
 
 let pendingWaits = [];
 
+// While a search is in flight, every "info ..." line the engine emits is
+// also handed to this listener (if set) so we can track the current best
+// move for each MultiPV slot as the search deepens. This is how difficulty
+// is now enforced: instead of asking Stockfish to play weaker (via
+// UCI_LimitStrength/UCI_Elo, which is inconsistent - see botDifficulty.js),
+// we always let it search at full honesty for the given depth/multiPV, then
+// deliberately choose among the ranked candidates ourselves.
+let infoListener = null;
+
 function dispatchLine(line) {
   if (typeof line !== "string") return;
+  if (infoListener) infoListener(line);
   pendingWaits = pendingWaits.filter((waiter) => {
     if (waiter.test(line)) {
       waiter.resolve(line);
@@ -81,9 +82,9 @@ async function getEngine() {
     engine.postMessage("uci");
     await uciOk;
 
-    // Strength-related options (UCI_LimitStrength / UCI_Elo) are sent fresh
-    // before every move in processQueue() instead of once here, since the
-    // difficulty can change from one game to the next on this same worker.
+    // MultiPV is (re)sent fresh before every move in processQueue() instead
+    // of once here, since the difficulty (and therefore the pool size) can
+    // change from one game to the next on this same worker.
     const readyOk = waitForLine((line) => line === "readyok");
     engine.postMessage("isready");
     await readyOk;
@@ -93,21 +94,116 @@ async function getEngine() {
   return engine;
 }
 
-function clampElo(elo) {
-  return Math.min(MAX_ELO, Math.max(MIN_ELO, elo));
-}
-
 function finishTurn() {
   queue.shift();
   isThinking = false;
   processQueue();
 }
 
+// Parses a single UCI "info ..." line for the fields we care about:
+//   multipv <n>   - which ranked line this is (1 = engine's current best)
+//   score cp <x>  | score mate <x>  - evaluation from the mover's POV
+//   pv <move> ... - the line's first (i.e. the actual candidate) move
+// Returns null if the line doesn't carry all three (e.g. "info string ...").
+function parseInfoLine(line) {
+  if (!line.startsWith("info ")) return null;
+
+  const multipvMatch = line.match(/\bmultipv (\d+)/);
+  const scoreMatch = line.match(/\bscore (cp|mate) (-?\d+)/);
+  const pvMatch = line.match(/\bpv (\S+)/);
+  if (!multipvMatch || !scoreMatch || !pvMatch) return null;
+
+  const index = parseInt(multipvMatch[1], 10);
+  const rawScore = parseInt(scoreMatch[2], 10);
+  // Normalize "mate in N" to a large centipawn-equivalent so it still sorts
+  // and compares sensibly against genuine cp scores (closer mates are
+  // "more winning"/"more losing" than further ones).
+  const centipawns =
+    scoreMatch[1] === "mate"
+      ? Math.sign(rawScore) * (100000 - Math.abs(rawScore) * 100)
+      : rawScore;
+
+  return { index, centipawns, move: pvMatch[1] };
+}
+
+// Picks which candidate move to actually play, given the ranked MultiPV
+// list (candidates[0] is the engine's genuine best move) and this tier's
+// mistake profile. With probability `mistakeChance` we deliberately play
+// something other than the best move, but only from among candidates whose
+// evaluation is within `maxCentipawnLoss` of the best - so weaker tiers
+// error more *often*, while the `maxCentipawnLoss` cap (set per tier)
+// bounds how *bad* any single error can be.
+//
+// If `mistakesOnlyWhenComplex` is set, the mistake roll is skipped entirely
+// unless the position is "close" - i.e. the best and second-best candidates
+// are within `complexityThreshold` centipawns of each other. A wide gap
+// means there's one clearly-best move (a hanging piece, a forced tactic),
+// which a strong tier wouldn't plausibly miss.
+//
+// Within the eligible set, `mistakeSoftening` controls how strongly smaller
+// losses are favored over larger ones (weight = 1 / (loss + softening)): a
+// low value concentrates mistakes near the best move (near-misses only,
+// used for the strong tiers), a high value flattens the distribution so
+// genuinely bad moves are plausible too (used for the weak tiers, so they
+// don't just make token, harmless "mistakes").
+function chooseMove(
+  candidates,
+  {
+    mistakeChance,
+    maxCentipawnLoss,
+    mistakeSoftening = 50,
+    mistakesOnlyWhenComplex = false,
+    complexityThreshold = 0,
+  },
+) {
+  if (candidates.length <= 1) return candidates[0];
+
+  const best = candidates[0];
+
+  if (mistakesOnlyWhenComplex) {
+    const second = candidates[1];
+    const gap = second ? best.centipawns - second.centipawns : Infinity;
+    if (gap > complexityThreshold) return best;
+  }
+
+  if (Math.random() >= mistakeChance) return best;
+
+  const eligible = candidates.slice(1).filter((candidate) => {
+    const loss = best.centipawns - candidate.centipawns;
+    return loss <= maxCentipawnLoss;
+  });
+  if (eligible.length === 0) return best;
+
+  const weights = eligible.map((candidate) => {
+    const loss = Math.max(0, best.centipawns - candidate.centipawns);
+    return 1 / (loss + mistakeSoftening);
+  });
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+
+  let roll = Math.random() * totalWeight;
+  for (let i = 0; i < eligible.length; i += 1) {
+    roll -= weights[i];
+    if (roll <= 0) return eligible[i];
+  }
+  return eligible[eligible.length - 1];
+}
+
 async function processQueue() {
   if (isThinking || queue.length === 0) return;
   isThinking = true;
 
-  const { fen, elo, depth, limitStrength, resolve, reject } = queue[0];
+  const {
+    fen,
+    depth,
+    multiPV,
+    mistakeChance,
+    maxCentipawnLoss,
+    mistakeSoftening,
+    mistakesOnlyWhenComplex,
+    complexityThreshold,
+    resolve,
+    reject,
+  } = queue[0];
 
   try {
     const chess = new Chess(fen);
@@ -121,12 +217,16 @@ async function processQueue() {
     const worker = await getEngine();
     const startedAt = Date.now();
 
+    const candidatesBySlot = new Map();
+    infoListener = (line) => {
+      const parsed = parseInfoLine(line);
+      if (!parsed) return;
+      candidatesBySlot.set(parsed.index, parsed);
+    };
+
     worker.postMessage(
-      `setoption name UCI_LimitStrength value ${limitStrength ? "true" : "false"}`,
+      `setoption name MultiPV value ${Math.max(1, multiPV || 1)}`,
     );
-    if (limitStrength) {
-      worker.postMessage(`setoption name UCI_Elo value ${clampElo(elo)}`);
-    }
     const readyOk = waitForLine((line) => line === "readyok");
     worker.postMessage("isready");
     await readyOk;
@@ -137,7 +237,28 @@ async function processQueue() {
     worker.postMessage(`go depth ${depth}`);
 
     const line = await bestMove;
-    const rawMove = line.split(" ")[1];
+    infoListener = null;
+
+    const candidates = [...candidatesBySlot.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, info]) => info);
+
+    let rawMove;
+    if (candidates.length > 0) {
+      const chosen = chooseMove(candidates, {
+        mistakeChance: mistakeChance ?? 0,
+        maxCentipawnLoss: maxCentipawnLoss ?? 0,
+        mistakeSoftening: mistakeSoftening ?? 50,
+        mistakesOnlyWhenComplex: mistakesOnlyWhenComplex ?? false,
+        complexityThreshold: complexityThreshold ?? 0,
+      });
+      rawMove = chosen.move;
+    } else {
+      // Fallback for the rare case no "info ... multipv ..." line arrived
+      // (e.g. mate-in-0 / only one legal move) - trust the engine's own
+      // bestmove verbatim.
+      rawMove = line.split(" ")[1];
+    }
 
     if (!rawMove || rawMove === "(none)") {
       resolve(null);
@@ -176,6 +297,7 @@ async function processQueue() {
       finishTurn();
     }, remainingDelay);
   } catch (err) {
+    infoListener = null;
     reject(err);
     finishTurn();
   }
@@ -185,13 +307,49 @@ async function processQueue() {
  * Ask the engine for a single move in the given position.
  * Resolves to { from, to, promotion, san } or null if there's no
  * legal move to make (checkmate/stalemate/etc).
+ *
+ * @param {string} fen
+ * @param {object} [options]
+ * @param {number} [options.depth] - fixed search depth for "go depth N".
+ * @param {number} [options.multiPV] - number of ranked candidate moves to
+ *   request from the engine; 1 disables mistake injection entirely.
+ * @param {number} [options.mistakeChance] - 0-1 probability of deliberately
+ *   playing something other than the engine's top choice.
+ * @param {number} [options.maxCentipawnLoss] - upper bound (in centipawns)
+ *   on how much worse a deliberately-chosen "mistake" move is allowed to be
+ *   relative to the top choice.
+ * @param {number} [options.mistakeSoftening] - weighting softener; higher
+ *   values allow worse mistakes to be picked more often (see chooseMove()).
+ * @param {boolean} [options.mistakesOnlyWhenComplex] - if true, only roll
+ *   for a mistake when the best/second-best candidates are close in eval.
+ * @param {number} [options.complexityThreshold] - centipawn gap under which
+ *   a position counts as "complex" when mistakesOnlyWhenComplex is set.
  */
 export function requestBotMove(
   fen,
-  { elo = DEFAULT_ELO, depth = 14, limitStrength = true } = {},
+  {
+    depth = 14,
+    multiPV = 1,
+    mistakeChance = 0,
+    maxCentipawnLoss = 0,
+    mistakeSoftening = 50,
+    mistakesOnlyWhenComplex = false,
+    complexityThreshold = 0,
+  } = {},
 ) {
   return new Promise((resolve, reject) => {
-    queue.push({ fen, elo, depth, limitStrength, resolve, reject });
+    queue.push({
+      fen,
+      depth,
+      multiPV,
+      mistakeChance,
+      maxCentipawnLoss,
+      mistakeSoftening,
+      mistakesOnlyWhenComplex,
+      complexityThreshold,
+      resolve,
+      reject,
+    });
     processQueue();
   });
 }
@@ -214,12 +372,14 @@ export function requestBotMove(
  * @param {() => boolean} [params.isCancelled] - checked right before the
  *   resolved move is applied; return true to discard it (e.g. the game was
  *   reset or left while the engine was still thinking).
- * @param {number} [params.elo]
  * @param {number} [params.depth]
- * @param {boolean} [params.limitStrength] - set false to run the engine
- *   fully unrestricted (used by the "Invincible" difficulty tier).
+ * @param {number} [params.multiPV]
+ * @param {number} [params.mistakeChance]
+ * @param {number} [params.maxCentipawnLoss]
+ * @param {number} [params.mistakeSoftening]
+ * @param {boolean} [params.mistakesOnlyWhenComplex]
+ * @param {number} [params.complexityThreshold]
  */
-
 export async function triggerBotMove({
   game,
   gameMode,
@@ -227,9 +387,13 @@ export async function triggerBotMove({
   botColor,
   makeMove,
   isCancelled,
-  elo = DEFAULT_ELO,
   depth = 14,
-  limitStrength = true,
+  multiPV = 1,
+  mistakeChance = 0,
+  maxCentipawnLoss = 0,
+  mistakeSoftening = 50,
+  mistakesOnlyWhenComplex = false,
+  complexityThreshold = 0,
 } = {}) {
   if (gameMode !== "bot") return null;
   if (!gameStarted) return null;
@@ -238,7 +402,15 @@ export async function triggerBotMove({
   if (game.isGameOver()) return null;
   if (game.turn() !== botColor) return null;
 
-  const move = await requestBotMove(game.fen(), { elo, depth, limitStrength });
+  const move = await requestBotMove(game.fen(), {
+    depth,
+    multiPV,
+    mistakeChance,
+    maxCentipawnLoss,
+    mistakeSoftening,
+    mistakesOnlyWhenComplex,
+    complexityThreshold,
+  });
   if (!move) return null;
   if (typeof isCancelled === "function" && isCancelled()) return null;
 
@@ -262,6 +434,7 @@ export function stopBot() {
   queue.length = 0;
   isThinking = false;
   pendingWaits = [];
+  infoListener = null;
 }
 
 /** Fully tear down the engine worker (e.g. when leaving a bot game). */
@@ -275,4 +448,5 @@ export function terminateBot() {
   queue.length = 0;
   isThinking = false;
   pendingWaits = [];
+  infoListener = null;
 }

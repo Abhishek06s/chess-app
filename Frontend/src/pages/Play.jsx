@@ -183,6 +183,7 @@ const Play = () => {
     capturedPieces,
     addCapturedPiece,
     resetCapturedPieces,
+    restoreCapturedPieces,
     whiteAdvantage,
     blackAdvantage,
     groupedWhitePieces,
@@ -1508,6 +1509,37 @@ const Play = () => {
 
   // Bot-games handling
 
+  // Replays a list of SAN moves from the starting position and returns every
+  // piece captured along the way, split by the color that was captured.
+  // Used to repopulate the "material won" display when resuming a saved bot
+  // game, since that history happened before this session existed and so
+  // never went through the live addCapturedPiece() calls in ChessBoard.jsx.
+  const computeCapturedPiecesFromMoves = (sanMoves) => {
+    const replay = new Chess();
+    const pieces = { white: [], black: [] };
+
+    for (const san of sanMoves || []) {
+      let result;
+      try {
+        result = replay.move(san);
+      } catch {
+        result = null;
+      }
+      if (!result) break; // stop on the first unparsable move rather than throw
+
+      if (result.captured) {
+        // The captured piece belongs to whoever did NOT just move.
+        const capturedColor = result.color === "w" ? "black" : "white";
+        pieces[capturedColor].push({
+          type: result.captured,
+          color: result.color === "w" ? "b" : "w",
+        });
+      }
+    }
+
+    return pieces;
+  };
+
   const handleContinueBotGame = () => {
     const activeGame = pendingBotGame;
     if (!activeGame) return;
@@ -1516,6 +1548,9 @@ const Play = () => {
     setGame(restoredGame);
     setBoardKey((prev) => prev + 1);
     setMoves(activeGame.moves || []);
+    restoreCapturedPieces(
+      computeCapturedPiecesFromMoves(activeGame.moves || []),
+    );
     setLastMove(null);
     setPlayerColor(activeGame.playerColor);
     setBoardOrientation(activeGame.playerColor);

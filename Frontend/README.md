@@ -1,43 +1,45 @@
 # ♟️ Chess App – Frontend
 
-A modern chess application built with **React** and **Vite**, featuring interactive gameplay, Stockfish-powered analysis, opening recognition, game reviews, leaderboards, and player profiles.
+A modern chess application built with **React** and **Vite**, featuring live multiplayer over WebSockets, bot play powered by **Stockfish**, post-game analysis, opening recognition, leaderboards, and player profiles.
 
 ---
 
 ## 🚀 Features
 
-- 🎮 Interactive chess gameplay
-- 🤖 Stockfish engine integration for analysis
-- 📊 Detailed game review system
+- 🎮 Interactive chess gameplay (drag-and-drop board)
+- 👥 Real-time multiplayer via Socket.IO
+- 🤖 Stockfish engine integration for bot opponents and analysis
+- 📊 Detailed game review system with move classification
 - ✨ Brilliant and Great move detection
-- 📚 ECO opening database support
-- ⏱️ Chess clock functionality
-- 🔊 Chess sound effects
+- 📚 ECO opening database support (auto opening recognition)
+- ⏱️ Chess clocks with configurable time controls
+- 🔊 Chess sound effects (move, capture, check, castle, promote, game end)
+- 🔐 Authentication (login / register) with protected and guest-only routes
 - 🏆 Leaderboard page
-- 👤 Player profile interface
-- 📱 Responsive user interface
-- 🎨 Smooth animations using Framer Motion
+- 👤 Player profile pages
+- 📱 Responsive UI with smooth animations
 
 ---
 
 ## 🛠️ Tech Stack
 
-### Frontend
+### Core
 - React 18
-- Vite
+- Vite 5
 - React Router DOM
-- Tailwind CSS
+- Tailwind CSS 4
 - Framer Motion
 
-### Chess Libraries
+### Chess & Realtime
 - Chess.js
 - React Chessboard
-- Stockfish Engine
+- Stockfish (WASM engine)
+- Socket.IO Client
 
-### Additional Libraries
-- Lucide React
-- React Feather
+### Networking & UX
+- Axios
 - React Hot Toast
+- Lucide React / React Feather (icons)
 
 ---
 
@@ -65,8 +67,12 @@ Frontend/
 │   │   ├── Footer.jsx
 │   │   ├── GameSidebar.jsx
 │   │   ├── Hero.jsx
+│   │   ├── MultiplayerTester.jsx
 │   │   ├── Navbar.jsx
 │   │   └── PlayerCard.jsx
+│   │
+│   ├── context/
+│   │   └── authContext.jsx      # Global auth state/provider
 │   │
 │   ├── data/
 │   │   ├── openings.js
@@ -89,19 +95,33 @@ Frontend/
 │   │   ├── Analysis.jsx
 │   │   ├── GameReview.jsx
 │   │   ├── Leaderboard.jsx
+│   │   ├── Login.jsx
+│   │   ├── Register.jsx
 │   │   └── Profile.jsx
 │   │
 │   ├── routes/
-│   │   └── AppRoutes.jsx
+│   │   ├── AppRoutes.jsx        # Top-level route definitions
+│   │   ├── GuestRoutes.jsx      # Routes only accessible when logged out
+│   │   └── ProtectedRoutes.jsx  # Routes that require authentication
 │   │
 │   ├── services/
-│   │   └── stockfishService.js
+│   │   ├── activeBotGame.service.js
+│   │   ├── api.service.js       # Axios instance / base config
+│   │   ├── auth.service.js
+│   │   ├── bot.service.js
+│   │   ├── game.service.js
+│   │   ├── socket.service.js
+│   │   ├── stockfishService.js
+│   │   └── user.service.js
 │   │
 │   ├── utils/
+│   │   ├── botDifficulty.js
 │   │   ├── brilliantMoveDetector.js
 │   │   ├── gameReview.js
 │   │   ├── greatMoveDetector.js
-│   │   └── moveTree.js
+│   │   ├── guestUtil.js
+│   │   ├── moveTree.js
+│   │   └── timeControls.js
 │   │
 │   ├── App.jsx
 │   ├── main.jsx
@@ -120,7 +140,7 @@ Clone the repository and navigate to the frontend directory:
 
 ```bash
 git clone <repository-url>
-cd Frontend
+cd chess-app-main/Frontend
 ```
 
 Install dependencies:
@@ -131,9 +151,22 @@ npm install
 
 ---
 
+## 🔧 Environment Variables
+
+Create a `.env` file in the `Frontend/` directory (if not already present) pointing to your running backend:
+
+```env
+VITE_API_URL=http://localhost:5000
+VITE_SOCKET_URL=http://localhost:5000
+```
+
+> Adjust the values to match wherever your Backend server is deployed. See the Backend README for server-side configuration.
+
+---
+
 ## ▶️ Running the Application
 
-Start the development server:
+Make sure the [Backend](../Backend) is running first (it provides authentication, game persistence, and the multiplayer WebSocket server), then start the frontend dev server:
 
 ```bash
 npm run dev
@@ -160,12 +193,13 @@ npm run lint     # Runs ESLint checks
 
 ## 🧠 Stockfish Integration
 
-The application uses **Stockfish 18 Lite** for:
+The application uses **Stockfish 18 Lite** (WASM) for:
 
+- Bot opponents at multiple difficulty levels
 - Position evaluation
 - Move analysis
 - Game review generation
-- Identifying strong moves
+- Identifying brilliant / great moves
 - Supporting post-game insights
 
 Stockfish assets are located in:
@@ -174,11 +208,28 @@ Stockfish assets are located in:
 public/stockfish/
 ```
 
+The `useStockFish` hook and `services/stockfishService.js` handle communication with the engine worker.
+
+---
+
+## 🔌 Real-Time Multiplayer
+
+`services/socket.service.js` manages the Socket.IO connection to the Backend for live human-vs-human games (moves, clocks, resignations, room management). The `MultiplayerTester` component can be used during development to exercise socket events.
+
+---
+
+## 🔐 Authentication & Routing
+
+- `context/authContext.jsx` exposes the current user and auth actions across the app.
+- `routes/ProtectedRoutes.jsx` guards pages that require a logged-in user (e.g. Profile).
+- `routes/GuestRoutes.jsx` guards pages only meant for logged-out visitors (e.g. Login, Register).
+- Guests can also play without an account via `utils/guestUtil.js`.
+
 ---
 
 ## 📖 Opening Database
 
-The application includes **ECO (Encyclopaedia of Chess Openings)** datasets to recognize common opening lines.
+The application includes **ECO (Encyclopaedia of Chess Openings)** datasets to recognize common opening lines as they're played.
 
 Supported categories:
 
@@ -192,13 +243,10 @@ Supported categories:
 
 ## 🔮 Future Enhancements
 
-- Backend integration
-- User authentication
-- Online multiplayer gameplay
-- Match history storage
-- Rating and ranking system
-- Cloud-based game analysis
-- Social features and friend system
+- Spectator mode for live games
+- Puzzle/training mode
+- Friend system and challenges
+- Mobile app wrapper
 
 ---
 
