@@ -1,6 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { socket } from "../services/socket.service";
 
+// Matchmaking modal — replaces the old "create room / join room" code-sharing
+// flow. Clicking "New Game" drops the player into a matchmaking pool (keyed
+// by time control + rated setting) and the server pairs them with the
+// closest-rated waiting opponent (or, if nobody is waiting, with whoever
+// joins next). A roomId is still generated behind the scenes exactly like
+// before, it's just no longer something the players have to exchange.
 const MultiplayerTester = ({
   activeUser,
   timeControl,
@@ -10,24 +16,21 @@ const MultiplayerTester = ({
   setMultiplayerBlackTime,
   setMultiplayerWhiteTime,
 }) => {
-  const [roomCode, setRoomCode] = useState("");
-  const [createdRoom, setCreatedRoom] = useState("");
-  const [playerColor, setPlayerColor] = useState("");
-  const [currentRoom, setCurrentRoom] = useState("");
-  const [gameStarted, setGameStarted] = useState(false);
+  const [status, setStatus] = useState("searching"); // "searching" | "matched" | "error"
+  const [errorMsg, setErrorMsg] = useState("");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const hasCancelledRef = useRef(false);
 
   useEffect(() => {
-    socket.on("room-created", (roomId) => {
-      setCreatedRoom(roomId);
-      setCurrentRoom(roomId);
-      console.log("Room:", roomId);
-    });
+    const handleSearching = () => {
+      setStatus("searching");
+    };
 
-    socket.on("game-started", (data) => {
+    const handleGameStarted = (data) => {
+      hasCancelledRef.current = true; // no need to cancel on unmount anymore
       const color = socket.id === data.white ? "white" : "black";
 
-      setPlayerColor(color);
-      setGameStarted(true);
+      setStatus("matched");
 
       onGameStarted({
         roomId: data.roomId,
@@ -49,91 +52,117 @@ const MultiplayerTester = ({
 
         isRated: data.isRated ?? isRated,
       });
-    });
+    };
 
-    socket.on(
-      "opponent-move",
-      ({ move, whiteTimeRemaining, blackTimeRemaining, activeColor }) => {
-        console.log("Opponent Move:", move);
-      },
-    );
-
-    socket.on("clock-update", (data) => {
+    const handleClockUpdate = (data) => {
       setMultiplayerWhiteTime(data.whiteTimeRemaining);
       setMultiplayerBlackTime(data.blackTimeRemaining);
-    });
+    };
 
-    socket.on("room-error", (msg) => {
-      console.log(msg);
+    const handleRoomError = (msg) => {
+      setStatus("error");
+      setErrorMsg(typeof msg === "string" ? msg : "Something went wrong.");
+    };
+
+    const handleAlreadyActive = () => {
+      setStatus("error");
+      setErrorMsg(
+        "Matchmaking is already in progress in another window or tab.",
+      );
+    };
+
+    socket.on("searching-match", handleSearching);
+    socket.on("game-started", handleGameStarted);
+    socket.on("clock-update", handleClockUpdate);
+    socket.on("room-error", handleRoomError);
+    socket.on("matchmaking-already-active", handleAlreadyActive);
+
+    // Enter the matchmaking pool as soon as the modal opens.
+    socket.emit("find-match", {
+      username: activeUser.username,
+      rating: activeUser.stats,
+      timeControl,
+      isRated,
     });
 
     return () => {
-      socket.off("room-created");
-      socket.off("game-started");
-      socket.off("opponent-move");
-      socket.off("room-error");
+      socket.off("searching-match", handleSearching);
+      socket.off("game-started", handleGameStarted);
+      socket.off("clock-update", handleClockUpdate);
+      socket.off("room-error", handleRoomError);
+      socket.off("matchmaking-already-active", handleAlreadyActive);
+
+      // Leave the queue if the modal closes before a match was found.
+      if (!hasCancelledRef.current) {
+        socket.emit("cancel-matchmaking");
+      }
     };
   }, []);
 
+  useEffect(() => {
+    if (status !== "searching") return;
+    const interval = setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [status]);
+
+  const handleCancel = () => {
+    hasCancelledRef.current = true;
+    socket.emit("cancel-matchmaking");
+    onClose();
+  };
+
+  const formattedTime = `${Math.floor(elapsedSeconds / 60)
+    .toString()
+    .padStart(2, "0")}:${(elapsedSeconds % 60).toString().padStart(2, "0")}`;
+
   return (
-    <div className="relative bg-zinc-900 border border-zinc-800 rounded-xl p-4 space-y-3 w-xl">
+    <div className="relative bg-zinc-900 border border-zinc-800 rounded-xl p-6 space-y-4 w-sm text-center">
       <button
-        onClick={onClose}
+        onClick={handleCancel}
         className="absolute top-2 right-2 text-zinc-400 hover:text-white cursor-pointer"
       >
         ✕
       </button>
-      <h3 className="font-semibold">Multiplayer Testing</h3>
 
-      {createdRoom && <p className="text-green-400">Room: {createdRoom}</p>}
+      <h3 className="font-semibold text-lg">
+        {status === "error" ? "Matchmaking" : "Finding an Opponent"}
+      </h3>
 
-      <input
-        type="text"
-        value={roomCode}
-        onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-        placeholder="Enter Room Code"
-        className="w-full bg-zinc-800 text-white border border-zinc-700 rounded-lg px-3 py-2"
-      />
-
-      <div className="flex gap-2">
-        <button
-          onClick={() =>
-            socket.emit("create-room", {
-              username: activeUser.username,
-              rating: activeUser.stats,
-              timeControl,
-              isRated,
-            })
-          }
-          className="px-3 py-2 bg-indigo-600 rounded-lg cursor-pointer"
-        >
-          Create Room
-        </button>
-
-        <button
-          onClick={() =>
-            socket.emit("join-room", {
-              roomId: roomCode,
-              username: activeUser.username,
-              rating: activeUser.stats,
-              isRated,
-            })
-          }
-          className="px-3 py-2 bg-emerald-600 rounded-lg cursor-pointer"
-        >
-          Join Room
-        </button>
-      </div>
-
-      <div>
-        {gameStarted && <p className="text-green-400 m-1">Match Started</p>}
-
-        {playerColor && (
-          <p className="text-yellow-400 m-1">
-            You are playing as {playerColor}
+      {status === "searching" && (
+        <>
+          <div className="flex justify-center py-4">
+            <div className="w-10 h-10 border-4 border-zinc-700 border-t-emerald-500 rounded-full animate-spin" />
+          </div>
+          <p className="text-zinc-400 text-sm">
+            Matching you with a player near your rating…
           </p>
-        )}
-      </div>
+          <p className="text-zinc-500 text-xs font-mono">{formattedTime}</p>
+          <button
+            onClick={handleCancel}
+            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg cursor-pointer text-sm"
+          >
+            Cancel
+          </button>
+        </>
+      )}
+
+      {status === "matched" && (
+        <p className="text-green-400 text-sm">Opponent found — starting game…</p>
+      )}
+
+      {status === "error" && (
+        <>
+          <p className="text-red-400 text-sm">{errorMsg}</p>
+          <button
+            onClick={handleCancel}
+            className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg cursor-pointer text-sm"
+          >
+            Close
+          </button>
+        </>
+      )}
     </div>
   );
 };

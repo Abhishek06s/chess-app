@@ -6,7 +6,79 @@ const jwt = require("jsonwebtoken");
 const rooms = {};
 
 const botGames = {};
+
+// Matchmaking queue, bucketed by `${base}:${increment}:${isRated}` — an
+// EXACT time control match, not just the same broad category (bullet /
+// blitz / rapid). E.g. 3+0 and 3+2 are both "blitz" but must never be
+// paired together.
+// Each entry: { socketId, userId, username, rating, rd, timeControl, isRated, gameType, joinedAt }
+const matchmakingQueues = {};
+
 let io;
+
+const ROOM_ID_CHARS =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+// ── Matchmaking tuning ───────────────────────────────────────────────────
+const MATCHMAKING_SWEEP_INTERVAL_MS = 1000;
+
+// Instantly determine maximum allowed rating difference based on game type and rating.
+function getMaxMatchRange(player) {
+  if (player.gameType === "bullet" || player.gameType === "blitz") {
+    return player.rating < 2500 ? 200 : 500;
+  } else {
+    // Rapid (and catch-all for any other formats)
+    return player.rating < 2000 ? 200 : 500;
+  }
+}
+
+// Generates a 12 character alphanumeric room id (collision-checked against
+// currently active rooms).
+function generateRoomId() {
+  let roomId;
+  do {
+    roomId = "";
+    for (let i = 0; i < 12; i++) {
+      roomId += ROOM_ID_CHARS.charAt(
+        Math.floor(Math.random() * ROOM_ID_CHARS.length),
+      );
+    }
+  } while (rooms[roomId]);
+  return roomId;
+}
+
+function getPoolKey(base, increment, isRated) {
+  return `${base}:${increment}:${Boolean(isRated)}`;
+}
+
+// Removes this socket's own queued entry from every pool. Deliberately
+// scoped to the socket only (not the userId) — a different browser/tab for
+// the same account has its own independent search and must not be
+// cancelled as a side effect of this one queueing or disconnecting.
+function removeFromMatchmakingQueues(socketId) {
+  for (const poolKey in matchmakingQueues) {
+    const pool = matchmakingQueues[poolKey];
+    const idx = pool.findIndex((entry) => entry.socketId === socketId);
+    if (idx !== -1) pool.splice(idx, 1);
+    if (matchmakingQueues[poolKey] && matchmakingQueues[poolKey].length === 0) {
+      delete matchmakingQueues[poolKey];
+    }
+  }
+}
+
+// Returns the queued entry for this userId, if that account already has a
+// search running (in any pool, e.g. from another browser/tab). Guests
+// (no userId) are never deduped this way since they have no stable identity.
+function findActiveSearchForUser(userId) {
+  if (!userId) return null;
+  for (const poolKey in matchmakingQueues) {
+    const found = matchmakingQueues[poolKey].find(
+      (entry) => entry.userId === userId,
+    );
+    if (found) return found;
+  }
+  return null;
+}
 
 // Parses the raw Cookie header string — no extra dep needed
 function parseCookies(cookieStr = "") {
@@ -84,6 +156,168 @@ const initializeSocket = (server) => {
     clearTimeout(room.cleanupTimeout);
     room.cleanupTimeout = null;
   };
+
+  // Pairs two matchmaking-queue entries into a live room. Colors are
+  // assigned randomly. The underlying room/roomId mechanism is unchanged
+  // from the old create-room/join-room flow — only how two players find
+  // each other has changed.
+  const pairPlayersIntoRoom = (playerA, playerB) => {
+    const roomId = generateRoomId();
+
+    const whiteFirst = Math.random() < 0.5;
+    const white = whiteFirst ? playerA : playerB;
+    const black = whiteFirst ? playerB : playerA;
+
+    const whiteSocket = io.sockets.sockets.get(white.socketId);
+    const blackSocket = io.sockets.sockets.get(black.socketId);
+
+    // If either socket vanished (disconnected) between being queued and
+    // being matched, put the still-connected player back in the queue.
+    if (!whiteSocket || !blackSocket) {
+      const stillHere = whiteSocket ? white : blackSocket ? black : null;
+      if (stillHere) {
+        const poolKey = getPoolKey(
+          stillHere.timeControl.base,
+          stillHere.timeControl.increment,
+          stillHere.isRated,
+        );
+        if (!matchmakingQueues[poolKey]) matchmakingQueues[poolKey] = [];
+        matchmakingQueues[poolKey].push(stillHere);
+        attemptMatchesInPool(poolKey);
+      }
+      return;
+    }
+
+    const startingFen = new Chess().fen();
+
+    rooms[roomId] = {
+      white: white.socketId,
+      black: black.socketId,
+      whiteUserId: white.userId,
+      blackUserId: black.userId,
+      whiteName: white.username,
+      blackName: black.username,
+      gameType: white.gameType,
+      timeControl: {
+        base: white.timeControl.base,
+        increment: white.timeControl.increment,
+      },
+      isRated: Boolean(white.isRated),
+      whiteRating: white.rating,
+      blackRating: black.rating,
+      whiteTimeRemaining: white.timeControl.base * 1000,
+      blackTimeRemaining: white.timeControl.base * 1000,
+      activeColor: "w",
+      lastMoveTime: Date.now(),
+      moveCount: 0,
+      gameOver: false,
+      pendingDrawOffer: null,
+      disconnected: null,
+      cleanupTimeout: null,
+      fen: startingFen,
+      moves: [],
+      firstMoveAbortSeconds: null,
+      whiteMoved: false,
+      blackMoved: false,
+    };
+
+    whiteSocket.join(roomId);
+    blackSocket.join(roomId);
+
+    const room = rooms[roomId];
+
+    io.to(roomId).emit("game-started", {
+      room,
+      roomId,
+      white: room.white,
+      black: room.black,
+      whiteUserId: room.whiteUserId,
+      blackUserId: room.blackUserId,
+      whiteName: room.whiteName,
+      blackName: room.blackName,
+      whiteRating: room.whiteRating,
+      blackRating: room.blackRating,
+      gameType: room.gameType,
+      timeControl: room.timeControl,
+      whiteTimeRemaining: room.whiteTimeRemaining,
+      blackTimeRemaining: room.blackTimeRemaining,
+      isRated: room.isRated,
+      whiteMoved: false,
+      blackMoved: false,
+    });
+  };
+
+  // Sweeps a single matchmaking pool and pairs up everyone who currently
+  // has an eligible opponent. 
+  const attemptMatchesInPool = (poolKey) => {
+    const pool = matchmakingQueues[poolKey];
+    if (!pool || pool.length < 2) return;
+
+    const matchedSocketIds = new Set();
+    const pairsToCreate = [];
+
+    // Oldest-waiting players get first pick of an opponent.
+    const waiting = [...pool].sort((a, b) => a.joinedAt - b.joinedAt);
+
+    for (const playerA of waiting) {
+      if (matchedSocketIds.has(playerA.socketId)) continue;
+      
+      const maxRangeA = getMaxMatchRange(playerA);
+
+      let bestOpponent = null;
+      let closestRatingDiff = Infinity;
+
+      for (const playerB of waiting) {
+        if (playerB.socketId === playerA.socketId) continue;
+        if (matchedSocketIds.has(playerB.socketId)) continue;
+        if (
+          playerA.userId &&
+          playerB.userId &&
+          playerA.userId === playerB.userId
+        )
+          continue; // no self-matching across tabs
+
+        const maxRangeB = getMaxMatchRange(playerB);
+        const ratingDiff = Math.abs(playerA.rating - playerB.rating);
+
+        // Both players must be within each other's maximum acceptable range limits.
+        if (ratingDiff > Math.min(maxRangeA, maxRangeB)) continue;
+
+        // Instantly find the absolute closest rating match available.
+        if (ratingDiff < closestRatingDiff) {
+          closestRatingDiff = ratingDiff;
+          bestOpponent = playerB;
+        }
+      }
+
+      if (bestOpponent) {
+        matchedSocketIds.add(playerA.socketId);
+        matchedSocketIds.add(bestOpponent.socketId);
+        pairsToCreate.push([playerA, bestOpponent]);
+      }
+    }
+
+    if (pairsToCreate.length === 0) return;
+
+    matchmakingQueues[poolKey] = pool.filter(
+      (entry) => !matchedSocketIds.has(entry.socketId),
+    );
+    if (matchmakingQueues[poolKey].length === 0) {
+      delete matchmakingQueues[poolKey];
+    }
+
+    for (const [playerA, playerB] of pairsToCreate) {
+      pairPlayersIntoRoom(playerA, playerB);
+    }
+  };
+
+  // Periodically re-sweep every pool so players who are only widening their
+  // rating range by waiting (no new player joining) still get matched.
+  setInterval(() => {
+    for (const poolKey in matchmakingQueues) {
+      attemptMatchesInPool(poolKey);
+    }
+  }, MATCHMAKING_SWEEP_INTERVAL_MS);
 
   const buildRoomState = (roomId, room, normalizedColor) => ({
     roomId,
@@ -253,100 +487,64 @@ const initializeSocket = (server) => {
       socket.join(getBotRoomName(authedUserId));
     }
 
+    // ── Matchmaking ──────────────────────────────────────────────────────────
+    // Replaces the old create-room/join-room "share a code" flow. Players
+    // are pooled by time control + rated setting and paired automatically —
+    // first by availability (the first two players in an empty pool pair
+    // immediately), and by closest rating whenever more than one candidate
+    // is waiting. Once paired, a room is created exactly like before (same
+    // roomId-keyed `rooms` object), just generated as a 12-character
+    // alphanumeric id instead of a 6-character shareable code.
     socket.on(
-      "create-room",
+      "find-match",
       ({ username, rating, timeControl, isRated = true }) => {
-        const roomId = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const gameType = getGameType(timeControl.base, timeControl.increment);
-        const startingFen = new Chess().fen();
+        const userId = getUserIdFromSocket(socket);
 
-        rooms[roomId] = {
-          white: socket.id,
-          black: null,
-          whiteUserId: getUserIdFromSocket(socket),
-          blackUserId: null,
-          whiteName: username,
-          blackName: null,
-          gameType,
+        // Same account already searching from another browser/tab? Don't
+        // start a second search — tell this tab so it can show a message.
+        const existingSearch = findActiveSearchForUser(userId);
+        if (existingSearch && existingSearch.socketId !== socket.id) {
+          socket.emit("matchmaking-already-active");
+          return;
+        }
+
+        const gameType = getGameType(timeControl.base, timeControl.increment);
+        const playerRating = rating?.[gameType]?.rating || 1200;
+        const playerRD = rating?.[gameType]?.rd || 350;
+
+        // Guard against double-queueing (e.g. a stray double click from
+        // this same tab re-emitting find-match).
+        removeFromMatchmakingQueues(socket.id);
+
+        // Exact time-control match required — e.g. 3+0 and 3+2 are both
+        // "blitz" but must never be paired with each other.
+        const poolKey = getPoolKey(timeControl.base, timeControl.increment, isRated);
+        if (!matchmakingQueues[poolKey]) matchmakingQueues[poolKey] = [];
+
+        matchmakingQueues[poolKey].push({
+          socketId: socket.id,
+          userId,
+          username,
+          rating: playerRating,
+          rd: playerRD,
           timeControl: {
             base: timeControl.base,
             increment: timeControl.increment,
           },
           isRated: Boolean(isRated),
-          whiteRating: rating?.[gameType]?.rating || 1200,
-          blackRating: null,
-          whiteTimeRemaining: timeControl.base * 1000,
-          blackTimeRemaining: timeControl.base * 1000,
-          activeColor: "w",
-          lastMoveTime: null,
-          moveCount: 0,
-          gameOver: false,
-          pendingDrawOffer: null,
-          disconnected: null,
-          cleanupTimeout: null,
-          fen: startingFen,
-          moves: [],
-          firstMoveAbortSeconds: null,
-          whiteMoved: false,
-          blackMoved: false,
-        };
+          gameType,
+          joinedAt: Date.now(),
+        });
 
-        socket.join(roomId);
-        socket.emit("room-created", roomId);
+        socket.emit("searching-match", { gameType, isRated: Boolean(isRated) });
+
+        attemptMatchesInPool(poolKey);
       },
     );
 
-    socket.on("join-room", ({ roomId, username, rating, isRated }) => {
-      const room = rooms[roomId];
-      if (!room) return socket.emit("room-error", "Room not found");
-      if (room.black) return socket.emit("room-error", "Room full");
-
-
-      // Prevent joining if rated/unrated preferences do not match
-      if (typeof isRated === "boolean" && room.isRated !== isRated) {
-        return socket.emit(
-          "room-error",
-          `Game mode mismatch: Room is ${room.isRated ? "Rated" : "Unrated"}.`,
-        );
-      }
-
-      // ── Block self-play ──────────────────────────────────
-      const joiningUserId = getUserIdFromSocket(socket);
-      if (
-        room.white === socket.id ||
-        (joiningUserId && room.whiteUserId === joiningUserId)
-      ) {
-        return socket.emit("room-error", "You cannot play against yourself!");
-      }
-
-      room.black = socket.id;
-      room.blackName = username;
-      room.blackUserId = getUserIdFromSocket(socket);
-      room.blackRating = rating?.[room.gameType]?.rating || 1200;
-
-      socket.join(roomId);
-      room.lastMoveTime = Date.now();
-      room.firstMoveAbortSeconds = null;
-
-      io.to(roomId).emit("game-started", {
-        room,
-        roomId,
-        white: room.white,
-        black: room.black,
-        whiteUserId: room.whiteUserId,
-        blackUserId: room.blackUserId,
-        whiteName: room.whiteName,
-        blackName: room.blackName,
-        whiteRating: room.whiteRating,
-        blackRating: room.blackRating,
-        gameType: room.gameType,
-        timeControl: room.timeControl,
-        whiteTimeRemaining: room.whiteTimeRemaining,
-        blackTimeRemaining: room.blackTimeRemaining,
-        isRated: room.isRated,
-        whiteMoved: false,
-        blackMoved: false,
-      });
+    socket.on("cancel-matchmaking", () => {
+      removeFromMatchmakingQueues(socket.id);
+      socket.emit("matchmaking-cancelled");
     });
 
     socket.on("move", ({ roomId, move }) => {
@@ -849,6 +1047,9 @@ const initializeSocket = (server) => {
 
     socket.on("disconnect", () => {
       console.log("User Disconnected:", socket.id);
+
+      // Drop this socket from the matchmaking queue if it was waiting.
+      removeFromMatchmakingQueues(socket.id);
 
       // If this socket owned the Stockfish engine for a bot game, hand
       // ownership to another still-open tab for the same user, if any.
