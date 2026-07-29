@@ -6,7 +6,7 @@ A full-stack, real-time chess platform. Play against **Stockfish** bots or chall
 
 ## ✨ Highlights
 
-- 👥 **Live multiplayer** — real-time games over Socket.IO, with rooms, clocks, and reconnection handling
+- 👥 **Live multiplayer** — real-time games over Socket.IO, with rooms, matchmaking, clocks, and reconnection handling
 - 🤖 **Bot play** — Stockfish 18 (WASM) opponents at multiple difficulty levels
 - 📊 **Game review** — automatic move classification, brilliant/great move detection, and opening recognition (ECO database)
 - 🔐 **Accounts & ratings** — JWT-based auth with per-format stats (bullet / blitz / rapid) and a Glicko-style rating field
