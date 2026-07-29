@@ -277,6 +277,8 @@ const initializeSocket = (server) => {
         )
           continue; // no self-matching across tabs
 
+        if (playerA.isGuest !== playerB.isGuest) continue; // guests only pair with guests
+
         const maxRangeB = getMaxMatchRange(playerB);
         const ratingDiff = Math.abs(playerA.rating - playerB.rating);
 
@@ -533,6 +535,10 @@ const initializeSocket = (server) => {
           },
           isRated: Boolean(isRated),
           gameType,
+          // Derived from the server-verified JWT (not client input), so it
+          // can't be spoofed — guests have no JWT cookie and always resolve
+          // to userId === null here.
+          isGuest: !userId,
           joinedAt: Date.now(),
         });
 

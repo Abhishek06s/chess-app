@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Chess } from "chess.js";
 import { Trophy, Scale, XCircle } from "lucide-react";
+import { ZoomIn } from "react-feather";
 
 import ChessBoard from "../components/ChessBoard";
 import GameSidebar from "../components/GameSidebar";
@@ -67,6 +69,7 @@ const calculateGameType = (baseInSeconds, incrementInSeconds) => {
 };
 
 const Play = () => {
+  const navigate = useNavigate();
   const { user, setUser, loading: authLoading } = useAuth();
 
   const [guestUser, setGuestUser] = useState(null);
@@ -1096,7 +1099,7 @@ const Play = () => {
             undefined,
             null,
             resolvedMoves,
-            resolvedFen
+            resolvedFen,
           );
         }
       },
@@ -1163,7 +1166,7 @@ const Play = () => {
         whiteTime,
         blackTime,
         moves,
-        game.fen()
+        game.fen(),
       );
     } else if (game.isStalemate()) {
       setGameResult("🤝 Draw by Stalemate");
@@ -1633,7 +1636,19 @@ const Play = () => {
   return (
     <div className="min-h-screen bg-zinc-950 text-white py-8 px-4 md:px-12 lg:px-20 antialiased selection:bg-purple-500/30">
       <h1 className="text-2xl font-bold tracking-tight mb-8 text-white p-4 bg-zinc-900 border border-white/10 rounded-xl shadow-lg flex items-center justify-between">
-        <span>Play Chess</span>
+        <div className="flex items-center gap-3">
+          <span>Play Chess</span>
+          {isLoggedIn && (
+            <button
+              onClick={() => navigate("/analysis")}
+              className="bg-zinc-800 hover:bg-zinc-750 border border-white/10 p-2 rounded-xl transition shadow cursor-pointer flex items-center justify-center"
+              title="Analyze any game"
+            >
+              <ZoomIn size={18} className="text-zinc-200" />
+            </button>
+          )}
+        </div>
+
         {activeUser?.isGuest && (
           <span className="text-xs bg-amber-500/10 text-amber-400 border border-white/10 px-2.5 py-1 rounded-md font-medium">
             Guest Mode
