@@ -82,6 +82,7 @@ const GameSidebar = ({
   pendingBotGame,
   handleContinueBotGame,
   handleStartNewBotGame,
+  assignBotGameRatings,
 }) => {
   const navigate = useNavigate();
   const [showShareMenu, setShowShareMenu] = useState(false);
@@ -199,6 +200,7 @@ const GameSidebar = ({
         : botColorChoice;
     setPlayerColor(resolvedColor);
     setBoardOrientation(resolvedColor);
+    assignBotGameRatings?.(resolvedColor);
 
     resetClock();
     setGame(new Chess());

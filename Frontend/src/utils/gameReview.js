@@ -6,6 +6,7 @@ import {
   seenGreatPositions,
 } from "./greatMoveDetector";
 import { isBrilliantMove } from "./brilliantMoveDetector";
+import { parseClockMs } from "./pgnClock";
 
 import openingBook from "../data/openings";
 
@@ -65,13 +66,13 @@ export function classifyMove({
   isBrilliant,
   isForced,
 }) {
-  if (isBookMove) return { classification: "Book", accuracyLoss: 0 };
-  if (isBrilliant) return { classification: "Brilliant", accuracyLoss: 0 };
-  if (isForced) return { classification: "Forced", accuracyLoss: 0 };
-
   const beforeEP = evalToExpectedPoints(evalBefore, side);
   const afterEP = evalToExpectedPoints(evalAfter, side);
   const loss = Math.max(0, beforeEP - afterEP);
+
+  if (isBookMove) return { classification: "Book", accuracyLoss: loss > 0.025 ? loss : 0 };
+  if (isBrilliant) return { classification: "Brilliant", accuracyLoss: 0 };
+  if (isForced) return { classification: "Forced", accuracyLoss: 0 };
 
   if (isTopMove && isGreatMoveCandidate && loss <= 0.02) {
     return { classification: "Great", accuracyLoss: loss };
@@ -103,6 +104,11 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
   const moves = game.history({ verbose: true });
   const review = [];
   const replay = new Chess();
+
+  const commentsByFen = {};
+  game.getComments().forEach(({ fen, comment }) => {
+    commentsByFen[fen] = comment;
+  });
 
   const totalSteps = moves.length + 1;
   let prevEngineBefore = null;
@@ -287,6 +293,7 @@ export async function generateGameReview(pgn, analyzePosition, onProgress) {
       bestMove: engineBefore.bestMove,
       accuracyLoss: moveData.accuracyLoss,
       classification: moveData.classification,
+      clockMs: parseClockMs(commentsByFen[fenAfter]),
     });
 
     prevEngineBefore = engineBefore;

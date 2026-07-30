@@ -160,6 +160,8 @@ const Play = () => {
       blackPlayerId,
       whitePlayerName,
       blackPlayerName,
+      whitePlayerRating,
+      blackPlayerRating,
       timeControl,
       gameType,
       isRated,
@@ -308,6 +310,19 @@ const Play = () => {
     gameStarted,
     isGameOver,
   ]);
+
+  const assignBotGameRatings = (resolvedColor) => {
+    const userRating =
+      activeUser?.stats?.[gameType]?.rating || activeUser?.rating || 1200;
+
+    if (resolvedColor === "white") {
+      setWhitePlayerRating(userRating);
+      setBlackPlayerRating(1500);
+    } else {
+      setBlackPlayerRating(userRating);
+      setWhitePlayerRating(1500);
+    }
+  };
 
   // ── DRAW ───────────────────────────────────────────────────────────────────
 
@@ -878,6 +893,8 @@ const Play = () => {
       blackPlayerId: currentBlackPlayerId,
       whitePlayerName: currentWhitePlayerName,
       blackPlayerName: currentBlackPlayerName,
+      whitePlayerRating: currentWhitePlayerRating,
+      blackPlayerRating: currentBlackPlayerRating,
       timeControl: currentTimeControl,
       gameType: currentGameType,
       isRated: currentIsRated,
@@ -911,7 +928,6 @@ const Play = () => {
         }
       });
 
-      const finalPgn = finalPgnOverride || cleanGameInstance.pgn();
       const finalFen = finalFenOverride || cleanGameInstance.fen();
 
       let openingData = { name: "Custom Variation / Open Game", eco: "A00" };
@@ -949,6 +965,69 @@ const Play = () => {
           : "Stockfish Bot");
 
       const botId = "000000000000000000000000";
+
+      // ── Resolve the White/Black names & Elos that belong in the PGN
+      // tags, regardless of whether this was a multiplayer or bot game ──
+      const botTier = getBotDifficulty(currentBotDifficulty);
+      const humanName =
+        currentUser.username || currentUser.name || "Player";
+      const humanRating =
+        currentUser.stats?.[currentGameType]?.rating ?? null;
+
+      const pgnWhiteName = isMultiplayer
+        ? currentWhitePlayerName || "White"
+        : currentPlayerColor === "white"
+          ? humanName
+          : `${botTier.label} Bot`;
+      const pgnBlackName = isMultiplayer
+        ? currentBlackPlayerName || "Black"
+        : currentPlayerColor === "black"
+          ? humanName
+          : `${botTier.label} Bot`;
+
+      const pgnWhiteElo = isMultiplayer
+        ? currentWhitePlayerRating ?? null
+        : currentPlayerColor === "white"
+          ? humanRating
+          : botTier.elo;
+      const pgnBlackElo = isMultiplayer
+        ? currentBlackPlayerRating ?? null
+        : currentPlayerColor === "black"
+          ? humanRating
+          : botTier.elo;
+
+      const pgnEventName = isMultiplayer
+        ? `${currentIsRated ? "Rated" : "Casual"} ${currentGameType} game`
+        : `${botTier.label} Bot game`;
+
+      const pgnDate = (() => {
+        const d = new Date();
+        const pad = (n) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
+      })();
+
+      const pgnTimeControl = isMultiplayer
+        ? `${currentTimeControl.base}+${currentTimeControl.increment}`
+        : "-";
+
+      if (!finalPgnOverride) {
+        cleanGameInstance.setHeader("Event", pgnEventName);
+        cleanGameInstance.setHeader("Site", "ChessHub");
+        cleanGameInstance.setHeader("Date", pgnDate);
+        cleanGameInstance.setHeader("Round", "?");
+        cleanGameInstance.setHeader("White", pgnWhiteName);
+        cleanGameInstance.setHeader("Black", pgnBlackName);
+        if (pgnWhiteElo !== null && pgnWhiteElo !== undefined) {
+          cleanGameInstance.setHeader("WhiteElo", String(pgnWhiteElo));
+        }
+        if (pgnBlackElo !== null && pgnBlackElo !== undefined) {
+          cleanGameInstance.setHeader("BlackElo", String(pgnBlackElo));
+        }
+        cleanGameInstance.setHeader("TimeControl", pgnTimeControl);
+        cleanGameInstance.setHeader("Result", result || "*");
+      }
+
+      const finalPgn = finalPgnOverride || cleanGameInstance.pgn();
 
       const response = await createGame({
         whitePlayer: isMultiplayer
@@ -1412,6 +1491,7 @@ const Play = () => {
         setPlayerColor(state.playerColor);
         setBoardOrientation(state.playerColor);
         setBotColorChoice(state.playerColor);
+        assignBotGameRatings(state.playerColor);
       }
       setGameMode("bot");
       setEndgame({ type: null, winner: null });
@@ -1602,6 +1682,7 @@ const Play = () => {
       // Fallback for guests / a dropped socket: reset locally only.
       setPlayerColor(resolvedColor);
       setBoardOrientation(resolvedColor);
+      assignBotGameRatings(resolvedColor);
       resetClock();
       setGame(new Chess());
       setMoves([]);
@@ -1833,6 +1914,7 @@ const Play = () => {
             pendingBotGame={pendingBotGame}
             handleContinueBotGame={handleContinueBotGame}
             handleStartNewBotGame={handleStartNewBotGame}
+            assignBotGameRatings={assignBotGameRatings}
           />
         </div>
       </div>

@@ -7,11 +7,12 @@ const PlayerCard = ({
   color,
   time,
   isActive,
-  capturedPieces,
+  capturedPieces = [],
   advantage,
   statusText,
   ratingChange = null,
   showClock = true,
+  showOnlineDot = true,
 }) => {
   const formatTime = (ms = 0) => {
     if (typeof ms !== "number" || Number.isNaN(ms)) {
@@ -20,12 +21,19 @@ const PlayerCard = ({
 
     const totalSeconds = Math.floor(ms / 1000);
 
-    const minutes = Math.floor(totalSeconds / 60);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
 
     if (ms < 10000) {
       const tenths = Math.floor((ms % 1000) / 100);
       return `${seconds}.${tenths}`;
+    }
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds
+        .toString()
+        .padStart(2, "0")}`;
     }
 
     return `${minutes}:${seconds.toString().padStart(2, "0")}`;
@@ -88,7 +96,7 @@ const PlayerCard = ({
         </div>
 
         <div className="flex items-center gap-2">
-          <p className="text-zinc-400 text-sm">Rating: {rating}</p>
+          <p className="text-zinc-400 text-sm">Rating: {rating ?? "?"}</p>
           {ratingChange !== null && (
             <span
               className={`text-xs font-bold ${
@@ -145,11 +153,13 @@ const PlayerCard = ({
             {formatTime(time)}
           </p>
         )}
-        <div
-          className={`w-3 h-3 rounded-full ${
-            isOnline ? "bg-green-500" : "bg-red-500"
-          }`}
-        />
+        {showOnlineDot && (
+          <div
+            className={`w-3 h-3 rounded-full ${
+              isOnline ? "bg-green-500" : "bg-red-500"
+            }`}
+          />
+        )}
       </div>
     </div>
   );

@@ -6,6 +6,13 @@ import { Chessboard } from "react-chessboard";
 import { Chess } from "chess.js";
 import useStockfish from "../hooks/useStockFish";
 import useChessSounds from "../hooks/useChessSounds";
+import {
+  getClocksAtIndex,
+  pgnHasClockAnnotations,
+  inferBaseTimeMs,
+} from "../utils/pgnClock";
+import { getCapturedGroupsFromFen } from "../utils/capturedPieces";
+import PlayerCard from "../components/PlayerCard";
 
 import {
   ChevronLeft,
@@ -132,6 +139,44 @@ const GameReview = () => {
     currentReview?.fenAfter ||
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
+  const pgnHeaders = useMemo(() => {
+    if (!state?.pgn) return {};
+    const headerMatches = state.pgn.match(/\[(.*?)\]/g) || [];
+    const headers = {};
+    headerMatches.forEach((line) => {
+      const match = line.match(/\[(\w+)\s+"(.*)"\]/);
+      if (match) headers[match[1]] = match[2];
+    });
+    return headers;
+  }, [state?.pgn]);
+
+  const pgnHasClock = useMemo(
+    () => pgnHasClockAnnotations(state?.pgn),
+    [state?.pgn],
+  );
+
+  const baseTimeMs = useMemo(
+    () =>
+      inferBaseTimeMs(
+        pgnHeaders.TimeControl,
+        reviewData.map((entry) => entry.clockMs),
+      ),
+    [pgnHeaders, reviewData],
+  );
+
+  const { whiteClockMs, blackClockMs } = getClocksAtIndex(
+    reviewData,
+    currentIndex,
+    baseTimeMs,
+  );
+
+  const {
+    groupedWhitePieces,
+    groupedBlackPieces,
+    whiteAdvantage,
+    blackAdvantage,
+  } = getCapturedGroupsFromFen(currentFen);
+
   const { bestMove, depth, topLines } = useStockfish(currentFen);
 
   const gameHistory = useMemo(() => {
@@ -216,8 +261,7 @@ const GameReview = () => {
     if (!moves || moves.length === 0) return "0.0";
 
     const evaluatedMoves = moves.filter(
-      (move) =>
-        move.classification !== "Book" && move.classification !== "Forced",
+      (move) => move.classification !== "Forced",
     );
 
     if (evaluatedMoves.length === 0) return "100.0";
@@ -302,7 +346,6 @@ const GameReview = () => {
     }
   }, [currentReview]);
 
-
   const customSquareStyles = useMemo(() => {
     if (!currentReview || reviewData.length === 0) return {};
 
@@ -377,6 +420,9 @@ const GameReview = () => {
     );
   }, [customSquareElements]);
 
+  const topCardColor = boardOrientation === "white" ? "black" : "white";
+  const bottomCardColor = boardOrientation === "white" ? "white" : "black";
+
   if (isReviewing) {
     return (
       <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center p-4">
@@ -406,10 +452,44 @@ const GameReview = () => {
       <h1 className="text-3xl text-center font-bold mb-10 -mt-4">
         Game Review
       </h1>
-      <div className="grid lg:grid-cols-[750px_1fr] gap-10 max-w-7xl mx-auto">
-        {/* Left Side: Board and Navigation Controls */}
-        <div className="grid grid-cols-[30px_1fr] gap-4">
-          <div className="w-6 h-150 bg-zinc-800 rounded-lg overflow-hidden relative flex flex-col justify-between border border-zinc-700 -ml-3">
+      
+      {/* Changed to items-start for perfect vertical alignment */}
+      <div className="grid lg:grid-cols-[max-content_1fr] gap-10 max-w-7xl mx-auto items-start">
+        
+        {/* Left Side: Exact height grid structure */}
+        <div className="grid grid-cols-[24px_600px] gap-x-4 gap-y-2">
+          
+          {/* Top Player Card */}
+          <div className="col-start-2">
+            <PlayerCard
+              name={
+                pgnHeaders[topCardColor === "white" ? "White" : "Black"] ||
+                (topCardColor === "white" ? "White" : "Black")
+              }
+              rating={
+                pgnHeaders[
+                  topCardColor === "white" ? "WhiteElo" : "BlackElo"
+                ] || null
+              }
+              color={topCardColor}
+              isOnline={false}
+              showOnlineDot={false}
+              showClock={pgnHasClock}
+              time={topCardColor === "white" ? whiteClockMs : blackClockMs}
+              isActive={false}
+              capturedPieces={
+                topCardColor === "white"
+                  ? groupedBlackPieces
+                  : groupedWhitePieces
+              }
+              advantage={
+                topCardColor === "white" ? whiteAdvantage : blackAdvantage
+              }
+            />
+          </div>
+
+          {/* Eval Bar - Explicit 600px height */}
+          <div className="w-6 h-[600px] bg-zinc-800 rounded-lg overflow-hidden relative flex flex-col justify-between border border-zinc-700">
             <div
               className="absolute w-full bg-white transition-all duration-300"
               style={evalBarStyle}
@@ -432,29 +512,56 @@ const GameReview = () => {
               </span>
             </div>
           </div>
-          <div className="flex flex-col items-center gap-2">
-            <div
-              style={{
-                position: "relative",
-                width: "100%",
-                maxWidth: "600px",
-                aspectRatio: "1/1",
-              }}
-              className="rounded-sm shadow-2xl"
-            >
-              <Chessboard
-                position={currentFen}
-                boardOrientation={boardOrientation}
-                boardWidth={600}
-                arePiecesDraggable={false}
-                promotionDialogVariant="modal"
-                customSquareStyles={customSquareStyles}
-                customSquare={MemoizedSquare}
-                customArrows={customArrows}
-              />
-            </div>
 
-            <div className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 mt-4 w-full max-w-150">
+          {/* Chessboard - Explicit 600px size */}
+          <div className="w-[600px] h-[600px] rounded-sm shadow-2xl relative">
+            <Chessboard
+              position={currentFen}
+              boardOrientation={boardOrientation}
+              boardWidth={600}
+              arePiecesDraggable={false}
+              promotionDialogVariant="modal"
+              customSquareStyles={customSquareStyles}
+              customSquare={MemoizedSquare}
+              customArrows={customArrows}
+            />
+          </div>
+
+          {/* Bottom Player Card */}
+          <div className="col-start-2">
+            <PlayerCard
+              name={
+                pgnHeaders[
+                  bottomCardColor === "white" ? "White" : "Black"
+                ] || (bottomCardColor === "white" ? "White" : "Black")
+              }
+              rating={
+                pgnHeaders[
+                  bottomCardColor === "white" ? "WhiteElo" : "BlackElo"
+                ] || null
+              }
+              color={bottomCardColor}
+              isOnline={false}
+              showOnlineDot={false}
+              showClock={pgnHasClock}
+              time={
+                bottomCardColor === "white" ? whiteClockMs : blackClockMs
+              }
+              isActive={false}
+              capturedPieces={
+                bottomCardColor === "white"
+                  ? groupedBlackPieces
+                  : groupedWhitePieces
+              }
+              advantage={
+                bottomCardColor === "white" ? whiteAdvantage : blackAdvantage
+              }
+            />
+          </div>
+
+          {/* Controls */}
+          <div className="col-start-2 mt-2">
+            <div className="grid grid-cols-[1fr_1fr_1fr_1fr_auto] gap-2 w-full">
               <button
                 onClick={goToFirst}
                 className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg flex justify-center transition-colors cursor-pointer text-white"
@@ -499,7 +606,7 @@ const GameReview = () => {
         </div>
 
         {/* Right Side: Score Cards, Inspector, and Move Feed Container */}
-        <div className="bg-zinc-900 rounded-xl p-5 -mr-15 max-h-167.5 overflow-y-auto border border-zinc-800 flex flex-col gap-4">
+        <div className="bg-zinc-900 rounded-xl p-5 max-h-[720px] h-full overflow-y-auto border border-zinc-800 flex flex-col gap-4">
           <div className="grid grid-cols-2 gap-4 shrink-0">
             <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800">
               <h3 className="font-bold mb-2">⚪ White</h3>

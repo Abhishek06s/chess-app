@@ -15,7 +15,19 @@ import {
 import openings from "../data/openings";
 import useChessSounds from "../hooks/useChessSounds";
 import useStockfish from "../hooks/useStockfish";
-import { buildMoveTree, MoveNode, exportTreeToPgn } from "../utils/moveTree";
+import {
+  buildMoveTree,
+  MoveNode,
+  exportTreeToPgn,
+  getMainline,
+} from "../utils/moveTree";
+import {
+  pgnHasClockAnnotations,
+  getClocksAtPath,
+  inferBaseTimeMs,
+} from "../utils/pgnClock";
+import { getCapturedGroupsFromFen } from "../utils/capturedPieces";
+import PlayerCard from "../components/PlayerCard";
 
 const Analysis = () => {
   const { state } = useLocation();
@@ -28,13 +40,14 @@ const Analysis = () => {
   const [showPgnModal, setShowPgnModal] = useState(false);
   const [pgnInput, setPgnInput] = useState("");
   const [pgnHeaders, setPgnHeaders] = useState({});
+  const [pgnHasClock, setPgnHasClock] = useState(false);
 
   const { playMoveSound, playCaptureSound, playCheckSound, playGameEndSound } =
     useChessSounds();
 
   const loadPgn = (pgn = pgnInput) => {
     const game = new Chess();
-    const headerMatches = pgnInput.match(/\[(.*?)\]/g) || [];
+    const headerMatches = pgn.match(/\[(.*?)\]/g) || [];
 
     const headers = {};
 
@@ -47,6 +60,7 @@ const Analysis = () => {
     });
 
     setPgnHeaders(headers);
+    setPgnHasClock(pgnHasClockAnnotations(pgn));
     if (game.loadPgn(pgn.trim())) {
       toast.message("PGN uploaded");
     }
@@ -237,6 +251,28 @@ const Analysis = () => {
 
   const currentPath = getPathFromRoot();
 
+  const baseTimeMs = rootNode
+    ? inferBaseTimeMs(
+        pgnHeaders.TimeControl,
+        getMainline(rootNode).map((node) => node.clockMs),
+      )
+    : null;
+
+  const { whiteClockMs, blackClockMs } = getClocksAtPath(
+    currentPath,
+    baseTimeMs,
+  );
+
+  const {
+    groupedWhitePieces,
+    groupedBlackPieces,
+    whiteAdvantage,
+    blackAdvantage,
+  } = getCapturedGroupsFromFen(currentFen);
+
+  const topCardColor = boardOrientation === "white" ? "black" : "white";
+  const bottomCardColor = boardOrientation === "white" ? "white" : "black";
+
   const movePairs = [];
   for (let i = 0; i < currentPath.length; i += 2) {
     movePairs.push({
@@ -296,9 +332,43 @@ const Analysis = () => {
         Analysis Board
       </h1>
 
-      <div className="grid lg:grid-cols-[700px_1fr] gap-10 max-w-7xl mx-auto">
-        <div className="grid grid-cols-[30px_1fr] gap-4">
-          <div className="w-6 h-150 bg-zinc-800 rounded-lg overflow-hidden relative flex flex-col justify-between border border-zinc-700">
+      {/* Changed to items-start for perfect vertical alignment */}
+      <div className="grid lg:grid-cols-[max-content_1fr] gap-10 max-w-7xl mx-auto items-start">
+        
+        {/* Left Side: Exact height grid structure */}
+        <div className="grid grid-cols-[24px_600px] gap-x-4 gap-y-2">
+          
+          {/* Top Player Card */}
+          <div className="col-start-2">
+            <PlayerCard
+              name={
+                pgnHeaders[topCardColor === "white" ? "White" : "Black"] ||
+                (topCardColor === "white" ? "White" : "Black")
+              }
+              rating={
+                pgnHeaders[
+                  topCardColor === "white" ? "WhiteElo" : "BlackElo"
+                ] || null
+              }
+              color={topCardColor}
+              isOnline={false}
+              showOnlineDot={false}
+              showClock={pgnHasClock}
+              time={topCardColor === "white" ? whiteClockMs : blackClockMs}
+              isActive={false}
+              capturedPieces={
+                topCardColor === "white"
+                  ? groupedBlackPieces
+                  : groupedWhitePieces
+              }
+              advantage={
+                topCardColor === "white" ? whiteAdvantage : blackAdvantage
+              }
+            />
+          </div>
+
+          {/* Eval Bar - Explicit 600px height */}
+          <div className="w-6 h-[600px] bg-zinc-800 rounded-lg overflow-hidden relative flex flex-col justify-between border border-zinc-700">
             <div
               className="absolute w-full bg-white transition-all duration-300"
               style={evalBarStyle}
@@ -322,22 +392,56 @@ const Analysis = () => {
             </div>
           </div>
 
-          <div className="flex flex-col items-center">
-            <div className="w-150 rounded-sm shadow-2xl">
-              <Chessboard
-                position={currentFen}
-                boardOrientation={boardOrientation}
-                arePiecesDraggable={true}
-                animationDuration={200}
-                boardWidth={600}
-                customSquareStyles={getCustomSquareStyles()}
-                onPieceDrop={onPieceDrop}
-                onPromotionPieceSelect={handlePromotionSelect}
-                showPromotionDialog={false}
-              />
-            </div>
+          {/* Chessboard - Explicit 600px size */}
+          <div className="w-[600px] h-[600px] rounded-sm shadow-2xl relative">
+            <Chessboard
+              position={currentFen}
+              boardOrientation={boardOrientation}
+              arePiecesDraggable={true}
+              animationDuration={200}
+              boardWidth={600}
+              customSquareStyles={getCustomSquareStyles()}
+              onPieceDrop={onPieceDrop}
+              onPromotionPieceSelect={handlePromotionSelect}
+              showPromotionDialog={false}
+            />
+          </div>
 
-            <div className="grid grid-cols-4 gap-2 mt-4 w-full max-w-150">
+          {/* Bottom Player Card */}
+          <div className="col-start-2">
+            <PlayerCard
+              name={
+                pgnHeaders[
+                  bottomCardColor === "white" ? "White" : "Black"
+                ] || (bottomCardColor === "white" ? "White" : "Black")
+              }
+              rating={
+                pgnHeaders[
+                  bottomCardColor === "white" ? "WhiteElo" : "BlackElo"
+                ] || null
+              }
+              color={bottomCardColor}
+              isOnline={false}
+              showOnlineDot={false}
+              showClock={pgnHasClock}
+              time={
+                bottomCardColor === "white" ? whiteClockMs : blackClockMs
+              }
+              isActive={false}
+              capturedPieces={
+                bottomCardColor === "white"
+                  ? groupedBlackPieces
+                  : groupedWhitePieces
+              }
+              advantage={
+                bottomCardColor === "white" ? whiteAdvantage : blackAdvantage
+              }
+            />
+          </div>
+
+          {/* Controls */}
+          <div className="col-start-2 mt-2">
+            <div className="grid grid-cols-4 gap-2 w-full">
               <button
                 onClick={goToFirst}
                 className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg flex justify-center transition-colors cursor-pointer"
@@ -363,14 +467,15 @@ const Analysis = () => {
                 <ChevronsRight size={24} />
               </button>
             </div>
-            <div className="flex gap-6">
+            
+            <div className="flex gap-6 mt-4">
               <button
                 onClick={() =>
                   setBoardOrientation((prev) =>
                     prev === "white" ? "black" : "white",
                   )
                 }
-                className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg mt-6 w-40 font-semibold cursor-pointer"
+                className="bg-zinc-800 hover:bg-zinc-700 p-3 rounded-lg w-40 font-semibold cursor-pointer"
               >
                 Flip
               </button>
@@ -383,7 +488,7 @@ const Analysis = () => {
                     },
                   })
                 }
-                className="bg-green-500 hover:bg-green-400 transition-all duration-200 px-4 py-2 rounded-lg mt-6 cursor-pointer"
+                className="bg-green-500 hover:bg-green-400 transition-all duration-200 px-4 py-2 rounded-lg w-full font-semibold cursor-pointer text-white"
               >
                 Review Game
               </button>
@@ -391,27 +496,27 @@ const Analysis = () => {
           </div>
         </div>
 
-        <div className="bg-zinc-900 rounded-xl p-5 max-h-167.5 overflow-y-auto border border-zinc-800 flex flex-col gap-4">
-          <div className="flex justify-between">
+        {/* Right Side: Sidebar */}
+        <div className="bg-zinc-900 rounded-xl p-5 max-h-[720px] h-full overflow-y-auto border border-zinc-800 flex flex-col gap-4">
+          <div className="flex justify-between items-center">
             <div>
-              <h2 className="text-xl font-bold tracking-wide mt-6 ml-4">
+              {/* Removed the margin-top so it naturally aligns at the top */}
+              <h2 className="text-xl font-bold tracking-wide">
                 Move List
               </h2>
             </div>
-            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4">
-              <button
-                onClick={() => setShowPgnModal(true)}
-                className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-lg transition-colors cursor-pointer text-amber-300"
-              >
-                Load PGN
-              </button>
-            </div>
-            <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-4 mr-4">
+            <div className="flex gap-2">
               <button
                 onClick={copyPgn}
-                className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-lg transition-colors cursor-pointer text-blue-400"
+                className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-lg transition-colors cursor-pointer text-blue-400 border border-zinc-700"
               >
                 Copy PGN
+              </button>
+              <button
+                onClick={() => setShowPgnModal(true)}
+                className="bg-zinc-800 hover:bg-zinc-700 px-4 py-2 rounded-lg transition-colors cursor-pointer text-amber-300 border border-zinc-700"
+              >
+                Load PGN
               </button>
             </div>
           </div>
@@ -495,7 +600,7 @@ const Analysis = () => {
           </div>
 
           <div
-            className="space-y-1.5 overflow-y-auto flex-1 max-h-62.5 pr-1"
+            className="space-y-1.5 overflow-y-auto flex-1 pr-1"
             ref={movesContainerRef}
           >
             {movePairs.map((pair, index) => (
@@ -543,7 +648,7 @@ const Analysis = () => {
           </div>
 
           {currentNode?.parent && currentNode.parent.children.length > 1 && (
-            <div className="bg-zinc-950/60 p-3 rounded-xl border border-zinc-800">
+            <div className="bg-zinc-950/60 p-3 rounded-xl border border-zinc-800 shrink-0">
               <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-wider mb-2">
                 Alternative Branches
               </h3>

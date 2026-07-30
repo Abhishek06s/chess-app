@@ -1,4 +1,5 @@
 import { Chess } from "chess.js";
+import { parseClockMs } from "./pgnClock";
 
 export class MoveNode {
   constructor({
@@ -7,6 +8,7 @@ export class MoveNode {
     san = null,
     move = null,
     parent = null,
+    clockMs = null,
   }) {
     this.id = id;
     this.fen = fen;
@@ -23,6 +25,7 @@ export class MoveNode {
     } : null;
     this.parent = parent;
     this.children = [];
+    this.clockMs = clockMs;
   }
 }
 
@@ -40,6 +43,11 @@ export function buildMoveTree(pgn) {
   } catch (e) {
     console.error("Failed to load initial PGN in tree builder:", e);
   }
+
+  const commentsByFen = {};
+  game.getComments().forEach(({ fen, comment }) => {
+    commentsByFen[fen] = comment;
+  });
 
   const moves = game.history({ verbose: true });
   const replay = new Chess();
@@ -60,6 +68,7 @@ export function buildMoveTree(pgn) {
       san: move.san,
       move,
       parent: current,
+      clockMs: parseClockMs(commentsByFen[replay.fen()]),
     });
 
     current.children.push(node);
@@ -95,6 +104,22 @@ export function getSiblingVariations(node) {
   return node.parent.children;
 }
 
+// Formats a clock reading (ms) back into the standard "{[%clk H:MM:SS]}"
+// PGN comment lichess/chess.com use, so exported PGNs keep their clock
+// data round-trippable. Returns "" when there's no clock to attach.
+function formatClockAnnotation(clockMs) {
+  if (clockMs == null) return "";
+
+  const totalSeconds = Math.max(0, Math.floor(clockMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return ` {[%clk ${hours}:${minutes.toString().padStart(2, "0")}:${seconds
+    .toString()
+    .padStart(2, "0")}]}`;
+}
+
 function buildPgnRecursive(node, moveNumber = 1, isBlackMove = false) {
   let pgn = "";
 
@@ -107,11 +132,10 @@ function buildPgnRecursive(node, moveNumber = 1, isBlackMove = false) {
   const mainMove = children[0];
 
   if (mainMove.san) {
-    if (!isBlackMove) {
-      pgn += `${moveNumber}. ${mainMove.san} `;
-    } else {
-      pgn += `${mainMove.san} `;
-    }
+    const moveText = !isBlackMove
+      ? `${moveNumber}. ${mainMove.san}`
+      : `${mainMove.san}`;
+    pgn += `${moveText}${formatClockAnnotation(mainMove.clockMs)} `;
   }
 
   // Variations
@@ -126,6 +150,7 @@ function buildPgnRecursive(node, moveNumber = 1, isBlackMove = false) {
       variationText += `(${moveNumber}... ${variation.san}`;
     }
 
+    variationText += formatClockAnnotation(variation.clockMs);
     variationText += " ";
     variationText += buildPgnRecursive(
       variation,
