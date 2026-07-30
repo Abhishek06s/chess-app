@@ -257,6 +257,13 @@ const GameReview = () => {
   const whiteSummary = getSummary("white");
   const blackSummary = getSummary("black");
 
+  const CLASSIFICATION_LOSS_FLOOR = {
+    Blunder: 0.6,
+    Miss: 0.45,
+    Mistake: 0.35,
+    Inaccuracy: 0.2,
+  };
+
   const calculateAccuracy = (moves) => {
     if (!moves || moves.length === 0) return "0.0";
 
@@ -266,13 +273,29 @@ const GameReview = () => {
 
     if (evaluatedMoves.length === 0) return "100.0";
 
-    const totalAccuracyScore = evaluatedMoves.reduce((sum, move) => {
-      const loss = move.accuracyLoss ?? 0;
-      const moveAccuracy = 100 * Math.exp(-9 * loss);
-      return sum + moveAccuracy;
-    }, 0);
+    const moveScores = evaluatedMoves.map((move) => {
+      const rawLoss = move.accuracyLoss ?? 0;
+      const floor = CLASSIFICATION_LOSS_FLOOR[move.classification] ?? 0;
+      const effectiveLoss = Math.max(rawLoss, floor);
+      const moveAccuracy = 100 * Math.exp(-9 * effectiveLoss);
+      return Math.min(100, Math.max(0, moveAccuracy));
+    });
 
-    const finalAccuracy = totalAccuracyScore / evaluatedMoves.length;
+    const mean = moveScores.reduce((sum, s) => sum + s, 0) / moveScores.length;
+
+    const harmonicMean =
+      moveScores.length / moveScores.reduce((sum, s) => sum + 1 / (s + 1), 0);
+
+    const variance =
+      moveScores.reduce((sum, s) => sum + (s - mean) ** 2, 0) /
+      moveScores.length;
+    const stdDev = Math.sqrt(variance);
+
+    const harmonicWeight = Math.min(0.3, stdDev / 100);
+    const meanWeight = 1 - harmonicWeight;
+
+    const finalAccuracy = mean * meanWeight + harmonicMean * harmonicWeight;
+
     return Math.min(100, Math.max(0, finalAccuracy)).toFixed(1);
   };
 
@@ -452,13 +475,11 @@ const GameReview = () => {
       <h1 className="text-3xl text-center font-bold mb-10 -mt-4">
         Game Review
       </h1>
-      
+
       {/* Changed to items-start for perfect vertical alignment */}
       <div className="grid lg:grid-cols-[max-content_1fr] gap-10 max-w-7xl mx-auto items-start">
-        
         {/* Left Side: Exact height grid structure */}
         <div className="grid grid-cols-[24px_600px] gap-x-4 gap-y-2">
-          
           {/* Top Player Card */}
           <div className="col-start-2">
             <PlayerCard
@@ -531,9 +552,8 @@ const GameReview = () => {
           <div className="col-start-2">
             <PlayerCard
               name={
-                pgnHeaders[
-                  bottomCardColor === "white" ? "White" : "Black"
-                ] || (bottomCardColor === "white" ? "White" : "Black")
+                pgnHeaders[bottomCardColor === "white" ? "White" : "Black"] ||
+                (bottomCardColor === "white" ? "White" : "Black")
               }
               rating={
                 pgnHeaders[
@@ -544,9 +564,7 @@ const GameReview = () => {
               isOnline={false}
               showOnlineDot={false}
               showClock={pgnHasClock}
-              time={
-                bottomCardColor === "white" ? whiteClockMs : blackClockMs
-              }
+              time={bottomCardColor === "white" ? whiteClockMs : blackClockMs}
               isActive={false}
               capturedPieces={
                 bottomCardColor === "white"

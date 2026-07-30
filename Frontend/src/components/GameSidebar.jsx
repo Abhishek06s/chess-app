@@ -83,6 +83,11 @@ const GameSidebar = ({
   handleContinueBotGame,
   handleStartNewBotGame,
   assignBotGameRatings,
+  whitePlayerName,
+  blackPlayerName,
+  whitePlayerRating,
+  blackPlayerRating,
+  completedGameRecord,
 }) => {
   const navigate = useNavigate();
   const [showShareMenu, setShowShareMenu] = useState(false);
@@ -127,17 +132,65 @@ const GameSidebar = ({
     previewInc,
   );
 
-  const openAnalysis = () => {
+  // Reconstructs a Chess instance from the recorded moves and stamps it with
+  // the player names/ratings so the resulting PGN carries proper headers
+  // (otherwise White/Black/Elo tags are missing and show up as "?").
+  const buildGameWithHeaders = () => {
     const tempGame = new Chess();
     moves.forEach((move) => tempGame.move(move));
+
+    const headerEntries = [
+      ["White", whitePlayerName || "White"],
+      ["Black", blackPlayerName || "Black"],
+    ];
+    if (whitePlayerRating != null) {
+      headerEntries.push(["WhiteElo", String(whitePlayerRating)]);
+    }
+    if (blackPlayerRating != null) {
+      headerEntries.push(["BlackElo", String(blackPlayerRating)]);
+    }
+    tempGame.header(...headerEntries.flat());
+
+    return tempGame;
+  };
+
+  const openAnalysis = () => {
+    if (completedGameRecord?.pgn) {
+      navigate("/analysis", {
+        state: {
+          moves,
+          pgn: completedGameRecord.pgn,
+          fen: completedGameRecord.fen,
+          gameId: completedGameRecord.id,
+        },
+      });
+      return;
+    }
+
+    // Fallback for cases where the DB save hasn't resolved yet (or failed):
+    // reconstruct locally, still stamping the known names/ratings so the
+    // headers aren't blank.
+    const tempGame = buildGameWithHeaders();
     navigate("/analysis", {
       state: { moves, pgn: tempGame.pgn(), fen: tempGame.fen() },
     });
   };
 
   const handleCopy = async (type) => {
-    const tempGame = new Chess();
-    moves.forEach((move) => tempGame.move(move));
+    if (type === "pgn" && completedGameRecord?.pgn) {
+      await navigator.clipboard.writeText(completedGameRecord.pgn);
+      toast.success("PGN copied!");
+      setShowShareMenu(false);
+      return;
+    }
+    if (type === "fen" && completedGameRecord?.fen) {
+      await navigator.clipboard.writeText(completedGameRecord.fen);
+      toast.success("FEN copied!");
+      setShowShareMenu(false);
+      return;
+    }
+
+    const tempGame = buildGameWithHeaders();
     const value = type === "pgn" ? tempGame.pgn() : tempGame.fen();
     await navigator.clipboard.writeText(value);
     toast.success(`${type.toUpperCase()} copied!`);

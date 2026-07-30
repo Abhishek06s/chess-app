@@ -119,6 +119,8 @@ const Play = () => {
   const [whiteRatingChange, setWhiteRatingChange] = useState(null);
   const [blackRatingChange, setBlackRatingChange] = useState(null);
 
+  const [completedGameRecord, setCompletedGameRecord] = useState(null);
+
   const [disconnectCountdown, setDisconnectCountdown] = useState(null);
   const [disconnectedColor, setDisconnectedColor] = useState(null);
   const [disconnectIsAbort, setDisconnectIsAbort] = useState(false);
@@ -266,6 +268,7 @@ const Play = () => {
       setWhiteRatingChange(null);
       setBlackRatingChange(null);
       hasSavedGameRef.current = false;
+      setCompletedGameRecord(null);
     }
   }, [gameStarted]);
 
@@ -1068,6 +1071,14 @@ const Play = () => {
           })(),
         }),
       });
+
+      if (response?.game) {
+        setCompletedGameRecord({
+          id: response.game._id,
+          pgn: response.game.pgn,
+          fen: response.game.fen,
+        });
+      }
 
       if (response?.ratingChanges) {
         applyRatingChanges(response.ratingChanges);
@@ -1915,6 +1926,11 @@ const Play = () => {
             handleContinueBotGame={handleContinueBotGame}
             handleStartNewBotGame={handleStartNewBotGame}
             assignBotGameRatings={assignBotGameRatings}
+            whitePlayerName={whitePlayerName}
+            blackPlayerName={blackPlayerName}
+            whitePlayerRating={whitePlayerRating}
+            blackPlayerRating={blackPlayerRating}
+            completedGameRecord={completedGameRecord}
           />
         </div>
       </div>
