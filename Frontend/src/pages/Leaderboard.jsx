@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { getLeaderboard } from "../services/user.service";
-import { Trophy, Medal } from "lucide-react";
+import { Trophy, Medal, ChevronDown } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const Leaderboard = () => {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState("rapid");
+  const [visibleCount, setVisibleCount] = useState(5);
 
   useEffect(() => {
     const fetchLeaderboard = async () => {
+      setLoading(true);
       try {
         const data = await getLeaderboard(mode);
         setPlayers(data.users);
@@ -21,9 +23,19 @@ const Leaderboard = () => {
     };
 
     fetchLeaderboard();
+    // Reset visible count when switching modes
+    setVisibleCount(5);
   }, [mode]);
 
-  if (loading) {
+  const handleViewMore = () => {
+    setVisibleCount((prev) => {
+      // If currently 5, add 5 to reach 10. Otherwise, add 10. Max out at 100.
+      if (prev === 5) return 10;
+      return Math.min(prev + 10, 100);
+    });
+  };
+
+  if (loading && players.length === 0) {
     return (
       <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center space-y-4">
         <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
@@ -46,6 +58,10 @@ const Leaderboard = () => {
         return "text-zinc-500 border-transparent";
     }
   };
+
+  // Only slice the array up to the visible count
+  const visiblePlayers = players.slice(0, visibleCount);
+  const showViewMore = visibleCount < players.length && visibleCount < 100;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white py-12 px-4">
@@ -100,7 +116,7 @@ const Leaderboard = () => {
               </thead>
 
               <tbody className="divide-y divide-zinc-800/50">
-                {players.map((player, index) => (
+                {visiblePlayers.map((player, index) => (
                   <tr
                     key={player._id}
                     className="group hover:bg-zinc-800/30 transition-colors duration-200"
@@ -108,7 +124,9 @@ const Leaderboard = () => {
                     {/* Rank Badge */}
                     <td className="p-5 text-center">
                       <div
-                        className={`inline-flex items-center justify-center w-8 h-8 rounded-full border text-sm font-bold ${getRankStyle(index)}`}
+                        className={`inline-flex items-center justify-center w-8 h-8 rounded-full border text-sm font-bold ${getRankStyle(
+                          index,
+                        )}`}
                       >
                         {index < 3 ? <Medal className="w-4 h-4" /> : index + 1}
                       </div>
@@ -153,6 +171,19 @@ const Leaderboard = () => {
               </tbody>
             </table>
           </div>
+
+          {/* View More Button */}
+          {showViewMore && (
+            <div className="p-4 border-t border-zinc-800 flex justify-center bg-zinc-900/30">
+              <button
+                onClick={handleViewMore}
+                className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-all text-sm font-medium cursor-pointer"
+              >
+                View More
+                <ChevronDown className="w-4 h-4" />
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

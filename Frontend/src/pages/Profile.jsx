@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getProfile, getUserByUsername } from "../services/user.service";
+import {
+  getProfile,
+  getUserByUsername,
+  searchUsers,
+  getPendingRequests,
+  sendFriendRequest,
+  acceptFriendRequest,
+  rejectFriendRequest,
+  removeFriend,
+} from "../services/user.service";
 import { getMyGames, getGamesByUserId } from "../services/game.service";
 import {
   Trophy,
@@ -18,6 +27,14 @@ import {
   ArrowUpRight,
   Bot,
   Users,
+  UserPlus,
+  UserMinus,
+  UserCheck,
+  Search,
+  Check,
+  X,
+  Bell,
+  Loader2,
 } from "lucide-react";
 
 const formatGameDate = (dateString) => {
@@ -47,10 +64,8 @@ const formatGameDate = (dateString) => {
 
 const formatTimeControl = (timeControl) => {
   if (!timeControl) return "";
-
   const minutes = timeControl.base / 60;
   const increment = timeControl.increment;
-
   return `${minutes}+${increment}`;
 };
 
@@ -100,7 +115,6 @@ const getOpponent = (game, userId) => {
     return matchesUser(game.player1) ? game.player2 : game.player1;
   }
 
-  // Legacy fallback for games saved before player1/player2 existed
   if (game.whitePlayer && game.blackPlayer) {
     return matchesUser(game.whitePlayer) ? game.blackPlayer : game.whitePlayer;
   }
@@ -120,6 +134,33 @@ const terminationLabels = {
   "threefold-repetition": "Threefold Repetition",
 };
 
+const ToastStack = ({ toasts, onDismiss }) => {
+  if (toasts.length === 0) return null;
+
+  return (
+    <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 items-end">
+      {toasts.map((toast) => (
+        <div
+          key={toast.id}
+          onClick={() => onDismiss(toast.id)}
+          className={`flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-2xl backdrop-blur-sm cursor-pointer animate-in fade-in slide-in-from-bottom-2 duration-200 ${
+            toast.type === "error"
+              ? "bg-rose-950/90 border-rose-500/30 text-rose-200"
+              : "bg-emerald-950/90 border-emerald-500/30 text-emerald-200"
+          }`}
+        >
+          {toast.type === "error" ? (
+            <X className="w-4 h-4 shrink-0" />
+          ) : (
+            <Check className="w-4 h-4 shrink-0" />
+          )}
+          <span className="text-sm font-medium">{toast.message}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 const Profile = () => {
   const navigate = useNavigate();
   const { username } = useParams();
@@ -128,9 +169,41 @@ const Profile = () => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState("rapid");
+
+  // Game states
   const [games, setGames] = useState([]);
   const [showGames, setShowGames] = useState(false);
   const [visibleGames, setVisibleGames] = useState(10);
+
+  // Friend states
+  const [friends, setFriends] = useState([]);
+  const [showFriends, setShowFriends] = useState(false);
+
+  // Add-friend search states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [requestingIds, setRequestingIds] = useState([]);
+
+  // Pending friend request states
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [showPendingRequests, setShowPendingRequests] = useState(false);
+  const [requestActionIds, setRequestActionIds] = useState([]);
+
+  // Toasts
+  const [toasts, setToasts] = useState([]);
+
+  const showToast = (message, type = "success") => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 3000);
+  };
+
+  const dismissToast = (id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -152,6 +225,7 @@ const Profile = () => {
 
         if (profileData?.user) {
           setUser(profileData.user);
+          setFriends(profileData.user.friends || []);
         }
       } catch (error) {
         console.error(error);
@@ -162,6 +236,125 @@ const Profile = () => {
 
     fetchProfile();
   }, [username]);
+
+  // Pending requests only apply to the logged-in user's own profile
+  useEffect(() => {
+    if (isPublicProfile) return;
+
+    const fetchPendingRequests = async () => {
+      try {
+        const response = await getPendingRequests();
+        setPendingRequests(response.requests || []);
+      } catch (error) {
+        console.error("Failed to fetch pending requests:", error);
+      }
+    };
+
+    fetchPendingRequests();
+  }, [isPublicProfile]);
+
+  // Debounced live search for the "Add Friends" panel
+  useEffect(() => {
+    if (isPublicProfile || !searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    setSearchLoading(true);
+    const timeout = setTimeout(async () => {
+      try {
+        const response = await searchUsers(searchQuery.trim());
+        setSearchResults(response.users || []);
+      } catch (error) {
+        console.error("Failed to search users:", error);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timeout);
+  }, [searchQuery, isPublicProfile]);
+
+  // Friend Handlers
+  const handleSendRequest = async (targetUser) => {
+    setRequestingIds((prev) => [...prev, targetUser._id]);
+    try {
+      await sendFriendRequest(targetUser._id);
+      showToast(`Friend request sent to ${targetUser.username}`);
+      setSearchResults((prev) =>
+        prev.map((u) =>
+          u._id === targetUser._id ? { ...u, requestSentByMe: true } : u,
+        ),
+      );
+    } catch (error) {
+      console.error("Failed to send friend request:", error);
+      showToast(
+        error?.response?.data?.message || "Failed to send friend request",
+        "error",
+      );
+    } finally {
+      setRequestingIds((prev) => prev.filter((id) => id !== targetUser._id));
+    }
+  };
+
+  const handleAcceptRequest = async (requestUser) => {
+    setRequestActionIds((prev) => [...prev, requestUser._id]);
+    try {
+      const response = await acceptFriendRequest(requestUser._id);
+      setPendingRequests((prev) =>
+        prev.filter((r) => r._id !== requestUser._id),
+      );
+      setFriends((prev) => [
+        ...prev,
+        response.friend || {
+          _id: requestUser._id,
+          username: requestUser.username,
+        },
+      ]);
+      showToast(`You and ${requestUser.username} are now friends`);
+    } catch (error) {
+      console.error("Failed to accept friend request:", error);
+      showToast(
+        error?.response?.data?.message || "Failed to accept friend request",
+        "error",
+      );
+    } finally {
+      setRequestActionIds((prev) =>
+        prev.filter((id) => id !== requestUser._id),
+      );
+    }
+  };
+
+  const handleRejectRequest = async (requestUser) => {
+    setRequestActionIds((prev) => [...prev, requestUser._id]);
+    try {
+      await rejectFriendRequest(requestUser._id);
+      setPendingRequests((prev) =>
+        prev.filter((r) => r._id !== requestUser._id),
+      );
+      showToast(`Friend request from ${requestUser.username} rejected`);
+    } catch (error) {
+      console.error("Failed to reject friend request:", error);
+      showToast(
+        error?.response?.data?.message || "Failed to reject friend request",
+        "error",
+      );
+    } finally {
+      setRequestActionIds((prev) =>
+        prev.filter((id) => id !== requestUser._id),
+      );
+    }
+  };
+
+  const handleRemoveFriend = async (friendId) => {
+    try {
+      await removeFriend(friendId);
+      setFriends((prev) => prev.filter((f) => f._id !== friendId));
+    } catch (error) {
+      console.error("Failed to remove friend:", error);
+      showToast("Failed to remove friend", "error");
+    }
+  };
 
   if (loading) {
     return (
@@ -188,6 +381,9 @@ const Profile = () => {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white p-4 md:p-8 flex flex-col items-center justify-start gap-6">
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Profile Header Card */}
       <div className="w-full max-w-4xl bg-zinc-900/80 backdrop-blur-sm rounded-3xl overflow-hidden border border-zinc-800 shadow-2xl">
         <div className="h-36 bg-linear-to-r from-indigo-600 via-purple-600 to-emerald-600"></div>
 
@@ -278,7 +474,281 @@ const Profile = () => {
         </div>
       </div>
 
+      {/* Friend Requests Section — only visible on the logged-in user's own profile */}
+      {!isPublicProfile && (
+        <div className="w-full max-w-4xl">
+          <div className="bg-zinc-900/60 backdrop-blur-md border border-zinc-800/80 rounded-3xl overflow-hidden shadow-xl mb-6">
+            <button
+              onClick={() => setShowPendingRequests(!showPendingRequests)}
+              className="w-full flex items-center justify-between p-6 cursor-pointer hover:bg-zinc-800/20 transition-all duration-200"
+            >
+              <div className="flex items-center gap-3">
+                <div className="relative p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                  <Bell className="w-5 h-5 text-amber-400" />
+                  {pendingRequests.length > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-rose-500 text-white text-[10px] font-bold rounded-full border-2 border-zinc-900 shadow-md">
+                      {pendingRequests.length > 9
+                        ? "9+"
+                        : pendingRequests.length}
+                    </span>
+                  )}
+                </div>
+                <div className="text-left">
+                  <h2 className="text-xl font-bold text-zinc-100">
+                    Friend Requests
+                  </h2>
+                  <p className="text-xs text-zinc-400 font-medium">
+                    {pendingRequests.length === 0
+                      ? "No pending requests"
+                      : `${pendingRequests.length} pending ${
+                          pendingRequests.length === 1 ? "request" : "requests"
+                        }`}
+                  </p>
+                </div>
+              </div>
+              <div className="p-2 rounded-xl bg-zinc-800/60 border border-zinc-700/40 text-zinc-400">
+                {showPendingRequests ? (
+                  <ChevronUp className="w-5 h-5" />
+                ) : (
+                  <ChevronDown className="w-5 h-5" />
+                )}
+              </div>
+            </button>
+
+            {showPendingRequests && (
+              <div className="border-t border-zinc-800/80 bg-zinc-950/40 p-4 md:p-6">
+                {pendingRequests.length === 0 ? (
+                  <div className="py-8 text-center text-zinc-500 flex flex-col items-center gap-2">
+                    <Bell className="w-8 h-8 opacity-20" />
+                    <p className="text-sm">You're all caught up.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {pendingRequests.map((requestUser) => {
+                      const isActing = requestActionIds.includes(
+                        requestUser._id,
+                      );
+                      return (
+                        <div
+                          key={requestUser._id}
+                          className="flex items-center justify-between gap-3 p-3 bg-zinc-900/50 border border-zinc-800/70 rounded-xl"
+                        >
+                          <button
+                            onClick={() =>
+                              navigate(`/profile/${requestUser.username}`)
+                            }
+                            className="flex items-center gap-3 hover:opacity-80 transition-opacity flex-1 text-left min-w-0"
+                          >
+                            <div className="w-9 h-9 shrink-0 bg-linear-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-400 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-inner">
+                              {requestUser.username.charAt(0)}
+                            </div>
+                            <span className="font-medium text-zinc-200 text-sm truncate">
+                              {requestUser.username}
+                            </span>
+                          </button>
+
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              onClick={() => handleAcceptRequest(requestUser)}
+                              disabled={isActing}
+                              title="Accept"
+                              className="p-2 bg-emerald-500/10 hover:bg-emerald-600 border border-emerald-500/30 hover:border-emerald-600 text-emerald-400 hover:text-white rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            >
+                              {isActing ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Check className="w-4 h-4" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleRejectRequest(requestUser)}
+                              disabled={isActing}
+                              title="Reject"
+                              className="p-2 bg-rose-500/10 hover:bg-rose-600 border border-rose-500/30 hover:border-rose-600 text-rose-400 hover:text-white rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Friends Section */}
       <div className="w-full max-w-4xl">
+        <div className="bg-zinc-900/60 backdrop-blur-md border border-zinc-800/80 rounded-3xl overflow-hidden shadow-xl mb-6">
+          <button
+            onClick={() => setShowFriends(!showFriends)}
+            className="w-full flex items-center justify-between p-6 cursor-pointer hover:bg-zinc-800/20 transition-all duration-200"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                <Users className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div className="text-left">
+                <h2 className="text-xl font-bold text-zinc-100 mt-1">
+                  Friends
+                  <span className="text-xs text-zinc-300 font-xl -mt-2 ml-4 rounded-full px-2 py-0.5 bg-zinc-800/50 border border-zinc-700/40">
+                    {friends.length}{" "}
+                  </span>
+                </h2>
+              </div>
+            </div>
+            <div className="p-2 rounded-xl bg-zinc-800/60 border border-zinc-700/40 text-zinc-400">
+              {showFriends ? (
+                <ChevronUp className="w-5 h-5" />
+              ) : (
+                <ChevronDown className="w-5 h-5" />
+              )}
+            </div>
+          </button>
+
+          {showFriends && (
+            <div className="border-t border-zinc-800/80 bg-zinc-950/40 p-4 md:p-6 space-y-6">
+              {/* Sub-section: Search & Add Friends — only on the logged-in user's own profile */}
+              {!isPublicProfile && (
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-3">
+                    Search &amp; Add Friends
+                  </h3>
+                  <div className="relative mb-3">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                    <input
+                      type="text"
+                      placeholder="Search by username..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-zinc-900 border border-zinc-700/60 rounded-xl pl-10 pr-4 py-2.5 text-zinc-200 text-sm focus:outline-none focus:border-emerald-500/50 transition-colors placeholder:text-zinc-500"
+                    />
+                    {searchLoading && (
+                      <Loader2 className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 animate-spin" />
+                    )}
+                  </div>
+
+                  {searchQuery.trim() && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {!searchLoading && searchResults.length === 0 ? (
+                        <div className="col-span-full py-6 text-center text-zinc-500 text-sm">
+                          No users found matching "{searchQuery}".
+                        </div>
+                      ) : (
+                        searchResults.map((result) => {
+                          const isRequesting = requestingIds.includes(
+                            result._id,
+                          );
+                          return (
+                            <div
+                              key={result._id}
+                              className="flex items-center justify-between gap-3 p-3 bg-zinc-900/50 border border-zinc-800/70 rounded-xl"
+                            >
+                              <button
+                                onClick={() =>
+                                  navigate(`/profile/${result.username}`)
+                                }
+                                className="flex items-center gap-3 hover:opacity-80 transition-opacity flex-1 text-left min-w-0"
+                              >
+                                <div className="w-9 h-9 shrink-0 bg-linear-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 text-indigo-400 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-inner">
+                                  {result.username.charAt(0)}
+                                </div>
+                                <span className="font-medium text-zinc-200 text-sm truncate">
+                                  {result.username}
+                                </span>
+                              </button>
+
+                              {result.isFriend ? (
+                                <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-400 shrink-0">
+                                  <UserCheck className="w-4 h-4" />
+                                  Friends
+                                </span>
+                              ) : result.requestSentByMe ? (
+                                <span className="px-3 py-1.5 text-xs font-medium text-zinc-500 shrink-0">
+                                  Requested
+                                </span>
+                              ) : result.requestReceivedFromThem ? (
+                                <span className="px-3 py-1.5 text-xs font-medium text-amber-400 shrink-0">
+                                  Sent you a request
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => handleSendRequest(result)}
+                                  disabled={isRequesting}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/10 hover:bg-emerald-600 border border-emerald-500/30 hover:border-emerald-600 text-emerald-400 hover:text-white rounded-lg font-medium text-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+                                >
+                                  {isRequesting ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <UserPlus className="w-3.5 h-3.5" />
+                                  )}
+                                  Add
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Sub-section: Friends list */}
+              <div>
+                {!isPublicProfile && (
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 mb-3">
+                    Your Friends
+                  </h3>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {friends.length === 0 ? (
+                    <div className="col-span-full py-8 text-center text-zinc-500 flex flex-col items-center gap-2">
+                      <Users className="w-8 h-8 opacity-20" />
+                      <p className="text-sm">No friends added yet.</p>
+                    </div>
+                  ) : (
+                    friends.map((friend) => (
+                      <div
+                        key={friend._id || friend.username}
+                        className="flex items-center justify-between p-3 bg-zinc-900/50 border border-zinc-800/70 hover:border-zinc-700 rounded-xl transition-colors group"
+                      >
+                        <button
+                          onClick={() =>
+                            navigate(`/profile/${friend.username}`)
+                          }
+                          className="flex items-center gap-3 hover:opacity-80 transition-opacity flex-1 text-left"
+                        >
+                          <div className="w-9 h-9 bg-linear-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 text-emerald-400 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-inner">
+                            {friend.username.charAt(0)}
+                          </div>
+                          <span className="font-medium text-zinc-200 text-sm truncate cursor-pointer">
+                            {friend.username}
+                          </span>
+                        </button>
+
+                        {!isPublicProfile && (
+                          <button
+                            onClick={() => handleRemoveFriend(friend._id)}
+                            className="p-2 text-zinc-600 hover:text-rose-400 hover:bg-rose-400/10 rounded-lg transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                            title="Remove friend"
+                          >
+                            <UserMinus className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Game History Section */}
         <div className="bg-zinc-900/60 backdrop-blur-md border border-zinc-800/80 rounded-3xl overflow-hidden shadow-2xl">
           <button
             onClick={() => setShowGames(!showGames)}
@@ -321,14 +791,10 @@ const Profile = () => {
                     const termination =
                       terminationLabels[game.termination] || game.termination;
 
-                    const userRating = resultInfo.isWhite
-                      ? game.whiteRating
-                      : game.blackRating;
                     const opponentRating = resultInfo.isWhite
                       ? game.blackRating
                       : game.whiteRating;
 
-                    // Design identifier checks
                     const isBotGame = opponent?.isBot;
 
                     return (
@@ -340,14 +806,11 @@ const Profile = () => {
                             : "border-zinc-800/70 hover:border-indigo-500/30"
                         } ${resultInfo.glow} hover:bg-zinc-800/40 rounded-2xl transition-all duration-200 p-4 md:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4`}
                       >
-                        {/* Side Accent Bar */}
                         <div
                           className={`absolute left-0 top-0 bottom-0 w-1 ${resultInfo.bar}`}
                         />
 
-                        {/* Left Side: Game Metadata & Opponent */}
                         <div className="flex items-start md:items-center gap-4 pl-2">
-                          {/* Color Piece Indicator */}
                           <div
                             className={`p-3 rounded-xl border flex items-center justify-center font-bold text-lg ${
                               resultInfo.isWhite
@@ -365,7 +828,6 @@ const Profile = () => {
 
                           <div className="space-y-1.5">
                             <div className="flex flex-wrap items-center gap-2.5">
-                              {/* Outcome Badge and User Rating */}
                               <div className="flex items-center gap-1.5">
                                 <span
                                   className={`text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md border ${resultInfo.bg}`}
@@ -374,7 +836,6 @@ const Profile = () => {
                                 </span>
                               </div>
 
-                              {/* Match Type Badge with Icon */}
                               <div
                                 className={`flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md border ${
                                   isBotGame
@@ -413,7 +874,6 @@ const Profile = () => {
                                 vs
                               </span>
 
-                              {/* Opponent Info and Rating */}
                               <div className="flex items-center gap-1.5">
                                 {opponent && !opponent.isBot ? (
                                   <button
@@ -441,7 +901,6 @@ const Profile = () => {
                               </div>
                             </div>
 
-                            {/* Opening Details & Termination */}
                             <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
                               <span className="bg-zinc-800/80 border border-zinc-700/50 px-2 py-0.5 rounded font-mono font-medium text-indigo-300">
                                 {game.opening?.eco || "ECO"}
@@ -458,7 +917,6 @@ const Profile = () => {
                           </div>
                         </div>
 
-                        {/* Right Side: Timing Info & Action */}
                         <div className="flex items-center justify-between md:justify-end w-full md:w-auto gap-4 pt-3 md:pt-0 border-t md:border-t-0 border-zinc-800/50 pl-2 md:pl-0">
                           <div className="flex md:flex-col items-center md:items-end justify-between md:justify-center text-xs text-zinc-400 gap-2 md:gap-1">
                             {!opponent.isBot && (
@@ -491,7 +949,6 @@ const Profile = () => {
                     );
                   })}
 
-                  {/* Load More Trigger */}
                   {visibleGames < games.length && (
                     <div className="pt-4 text-center">
                       <button

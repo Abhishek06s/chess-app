@@ -58,6 +58,28 @@ const userSchema = new mongoose.Schema(
       blitz: statsSchema,
       rapid: statsSchema,
     },
+
+    friends: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+
+    friendRequests: {
+      sent: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+      ],
+      received: [
+        {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+        },
+      ],
+    },
   },
   {
     timestamps: true,
