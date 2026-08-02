@@ -14,7 +14,7 @@ import {
 
 import openings from "../data/openings";
 import useChessSounds from "../hooks/useChessSounds";
-import useStockfish from "../hooks/useStockfish";
+import useStockfish from "../hooks/useStockFish";
 import {
   buildMoveTree,
   MoveNode,

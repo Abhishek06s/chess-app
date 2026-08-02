@@ -14,6 +14,15 @@ const botGames = {};
 // Each entry: { socketId, userId, username, rating, rd, timeControl, isRated, gameType, joinedAt }
 const matchmakingQueues = {};
 
+// Pending direct challenges (Challenge button -> ChallengeModal flow),
+// keyed by a generated challengeId. Each entry auto-expires after
+// CHALLENGE_TTL_MS if the target never responds.
+// Entry shape: { challengeId, challengerSocketId, challengerUserId,
+//   challengerUsername, challengerRating, targetUserId, timeControl,
+//   isRated, gameType, timeoutId }
+const challenges = {};
+const CHALLENGE_TTL_MS = 15000;
+
 // ── Presence tracking (online / offline / in-game) ──────────────────────────
 // userId -> Set of connected socketIds. A user can have several tabs open,
 // so "offline" only fires once the LAST socket for that user disconnects.
@@ -36,6 +45,18 @@ function computeUserStatus(userId) {
 function broadcastPresence(userId) {
   if (!userId || !io) return;
   io.emit("presence-update", { userId, status: computeUserStatus(userId) });
+}
+
+// Emits an event to every currently-connected socket (tab/device) for a
+// given userId. Used by REST controllers (e.g. friend requests) to push a
+// real-time notification to a user without going through a socket handler.
+// Silently no-ops if the user isn't online or the socket server hasn't
+// been initialized yet.
+function emitToUser(userId, event, payload) {
+  if (!userId || !io) return;
+  const sockets = onlineUsers[String(userId)];
+  if (!sockets || sockets.size === 0) return;
+  sockets.forEach((sid) => io.to(sid).emit(event, payload));
 }
 
 function markUserInGame(userId, roomId) {
@@ -87,6 +108,20 @@ function generateRoomId() {
 
 function getPoolKey(base, increment, isRated) {
   return `${base}:${increment}:${Boolean(isRated)}`;
+}
+
+// Generates a short, unguessable challenge id.
+function generateChallengeId() {
+  return `chal_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Clears a pending challenge's auto-expiry timer and removes it from the
+// store. Safe to call on an already-removed id.
+function clearChallenge(challengeId) {
+  const challenge = challenges[challengeId];
+  if (!challenge) return;
+  if (challenge.timeoutId) clearTimeout(challenge.timeoutId);
+  delete challenges[challengeId];
 }
 
 // Removes this socket's own queued entry from every pool. Deliberately
@@ -614,6 +649,152 @@ const initializeSocket = (server) => {
       socket.emit("matchmaking-cancelled");
     });
 
+    // ── Direct challenges (Challenge button -> ChallengeModal) ───────────────
+    socket.on(
+      "send-challenge",
+      ({ targetUserId, username, rating, timeControl, isRated = true }) => {
+        const challengerUserId = getUserIdFromSocket(socket);
+
+        if (!challengerUserId) {
+          return socket.emit("challenge-error", {
+            message: "You must be signed in to challenge another player.",
+          });
+        }
+        if (!targetUserId || targetUserId === challengerUserId) {
+          return socket.emit("challenge-error", {
+            message: "Invalid challenge target.",
+          });
+        }
+        if (
+          !timeControl ||
+          typeof timeControl.base !== "number" ||
+          typeof timeControl.increment !== "number"
+        ) {
+          return socket.emit("challenge-error", {
+            message: "Invalid time control.",
+          });
+        }
+
+        const targetSockets = onlineUsers[targetUserId];
+        if (
+          computeUserStatus(targetUserId) !== "online" ||
+          !targetSockets ||
+          targetSockets.size === 0
+        ) {
+          return socket.emit("challenge-error", {
+            message: "That player is no longer available to challenge.",
+          });
+        }
+
+        const gameType = getGameType(timeControl.base, timeControl.increment);
+        const challengerRating = rating?.[gameType]?.rating || 1200;
+        const challengeId = generateChallengeId();
+
+        const challenge = {
+          challengeId,
+          challengerSocketId: socket.id,
+          challengerUserId,
+          challengerUsername: username || "Player",
+          challengerRating,
+          targetUserId,
+          timeControl: {
+            base: timeControl.base,
+            increment: timeControl.increment,
+          },
+          isRated: Boolean(isRated),
+          gameType,
+          timeoutId: null,
+        };
+
+        challenge.timeoutId = setTimeout(() => {
+          clearChallenge(challengeId);
+          io.to(socket.id).emit("challenge-expired", { challengeId });
+          targetSockets.forEach((sid) =>
+            io.to(sid).emit("challenge-expired", { challengeId }),
+          );
+        }, CHALLENGE_TTL_MS);
+
+        challenges[challengeId] = challenge;
+
+        targetSockets.forEach((sid) => {
+          io.to(sid).emit("challenge-received", {
+            challengeId,
+            challenger: {
+              userId: challengerUserId,
+              username: challenge.challengerUsername,
+              rating: challengerRating,
+            },
+            isRated: challenge.isRated,
+            timeControl: challenge.timeControl,
+            gameType,
+          });
+        });
+
+        socket.emit("challenge-sent", { challengeId, targetUserId });
+      },
+    );
+
+    socket.on(
+      "respond-challenge",
+      ({ challengeId, accepted, username, rating }) => {
+        const challenge = challenges[challengeId];
+        if (!challenge) {
+          return socket.emit("challenge-error", {
+            message: "This challenge is no longer available.",
+          });
+        }
+
+        const responderUserId = getUserIdFromSocket(socket);
+        if (!responderUserId || responderUserId !== challenge.targetUserId) {
+          return socket.emit("challenge-error", {
+            message: "This challenge was not sent to you.",
+          });
+        }
+
+        clearChallenge(challengeId);
+
+        if (!accepted) {
+          io.to(challenge.challengerSocketId).emit("challenge-declined", {
+            challengeId,
+            targetUsername: username,
+          });
+          return;
+        }
+
+        const challengerSocket = io.sockets.sockets.get(
+          challenge.challengerSocketId,
+        );
+        if (!challengerSocket) {
+          return socket.emit("challenge-error", {
+            message: "The challenger is no longer connected.",
+          });
+        }
+
+        const responderRating = rating?.[challenge.gameType]?.rating || 1200;
+
+        const playerA = {
+          socketId: challenge.challengerSocketId,
+          userId: challenge.challengerUserId,
+          username: challenge.challengerUsername,
+          rating: challenge.challengerRating,
+          timeControl: challenge.timeControl,
+          isRated: challenge.isRated,
+          gameType: challenge.gameType,
+        };
+        const playerB = {
+          socketId: socket.id,
+          userId: responderUserId,
+          username: username || "Player",
+          rating: responderRating,
+          timeControl: challenge.timeControl,
+          isRated: challenge.isRated,
+          gameType: challenge.gameType,
+        };
+
+        pairPlayersIntoRoom(playerA, playerB);
+      },
+    );
+
     socket.on("move", ({ roomId, move }) => {
       const room = rooms[roomId];
       if (!room || room.gameOver) return;
@@ -1118,6 +1299,20 @@ const initializeSocket = (server) => {
       // Drop this socket from the matchmaking queue if it was waiting.
       removeFromMatchmakingQueues(socket.id);
 
+      // Cancel any challenge this socket sent — the target(s) should stop
+      // seeing a notification for a challenger who's no longer around.
+      for (const challengeId in challenges) {
+        const challenge = challenges[challengeId];
+        if (challenge.challengerSocketId !== socket.id) continue;
+        clearChallenge(challengeId);
+        const targetSockets = onlineUsers[challenge.targetUserId];
+        if (targetSockets) {
+          targetSockets.forEach((sid) =>
+            io.to(sid).emit("challenge-expired", { challengeId }),
+          );
+        }
+      }
+
       // If this socket owned the Stockfish engine for a bot game, hand
       // ownership to another still-open tab for the same user, if any.
       // If no tab is left, ownership simply clears and the next tab to click "Continue Game" will take it.
@@ -1190,4 +1385,4 @@ const initializeSocket = (server) => {
 
 const getIO = () => io;
 
-module.exports = { initializeSocket, getIO };
+module.exports = { initializeSocket, getIO, emitToUser };

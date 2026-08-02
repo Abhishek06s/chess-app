@@ -4,12 +4,17 @@ import { Trophy, Medal, ChevronDown } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import usePresence from "../hooks/usePresence";
 import StatusIndicator from "../components/StatusIndicator";
+import {ChallengeButton , ChallengeModal} from "../components/Challenge";
+import { useAuth } from "../context/authContext";
+import { socket } from "../services/socket.service";
 
 const Leaderboard = () => {
+  const { user: authUser } = useAuth();
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState("rapid");
   const [visibleCount, setVisibleCount] = useState(5);
+  const [challengeTarget, setChallengeTarget] = useState(null);
 
   useEffect(() => {
     const fetchLeaderboard = async () => {
@@ -35,6 +40,17 @@ const Leaderboard = () => {
       if (prev === 5) return 10;
       return Math.min(prev + 10, 100);
     });
+  };
+
+  const handleConfirmChallenge = ({ targetUser, rated, timeControl }) => {
+    socket.emit("send-challenge", {
+      targetUserId: targetUser._id,
+      username: authUser?.username,
+      rating: authUser?.stats,
+      timeControl,
+      isRated: rated,
+    });
+    setChallengeTarget(null);
   };
 
   // Hooks must run unconditionally on every render, so this is computed
@@ -75,6 +91,13 @@ const Leaderboard = () => {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white py-12 px-4">
+      <ChallengeModal
+        isOpen={!!challengeTarget}
+        targetUser={challengeTarget}
+        onClose={() => setChallengeTarget(null)}
+        onConfirm={handleConfirmChallenge}
+      />
+
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="text-center mb-10">
@@ -151,7 +174,11 @@ const Leaderboard = () => {
                         >
                           {player.username}
                         </NavLink>
-                        <StatusIndicator status={statusMap[player._id]} />
+                        {}<StatusIndicator status={statusMap[player._id]} />
+                        <ChallengeButton
+                          status={statusMap[player._id]}
+                          onClick={() => setChallengeTarget(player)}
+                        />
                       </div>
                     </td>
 

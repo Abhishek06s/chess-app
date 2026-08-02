@@ -12,8 +12,11 @@ import {
 } from "../services/user.service";
 import { getMyGames, getGamesByUserId } from "../services/game.service";
 import { useAuth } from "../context/authContext";
+import { socket } from "../services/socket.service";
 import usePresence from "../hooks/usePresence";
 import StatusIndicator from "../components/StatusIndicator";
+import { ChallengeButton, ChallengeModal } from "../components/Challenge";
+import { getHighestElo } from "../utils/highestElo";
 import {
   Trophy,
   Swords,
@@ -197,6 +200,9 @@ const Profile = () => {
   // Toasts
   const [toasts, setToasts] = useState([]);
 
+  // Challenge popup — the user currently being challenged (or null if closed)
+  const [challengeTarget, setChallengeTarget] = useState(null);
+
   // Live presence (online / offline / in-game) for the friends list, the
   // "search & add friends" results, and — when viewing someone else's
   // profile — the profile owner themself.
@@ -378,6 +384,26 @@ const Profile = () => {
     }
   };
 
+  // Challenge Handlers
+  const handleOpenChallenge = (targetUser) => {
+    setChallengeTarget(targetUser);
+  };
+
+  const handleCloseChallenge = () => {
+    setChallengeTarget(null);
+  };
+
+  const handleConfirmChallenge = ({ targetUser, rated, timeControl }) => {
+    socket.emit("send-challenge", {
+      targetUserId: targetUser._id,
+      username: authUser?.username,
+      rating: authUser?.stats,
+      timeControl,
+      isRated: rated,
+    });
+    setChallengeTarget(null);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center space-y-4">
@@ -405,6 +431,13 @@ const Profile = () => {
     <div className="min-h-screen bg-zinc-950 text-white p-4 md:p-8 flex flex-col items-center justify-start gap-6">
       <ToastStack toasts={toasts} onDismiss={dismissToast} />
 
+      <ChallengeModal
+        isOpen={!!challengeTarget}
+        targetUser={challengeTarget}
+        onClose={handleCloseChallenge}
+        onConfirm={handleConfirmChallenge}
+      />
+
       {/* Profile Header Card */}
       <div className="w-full max-w-4xl bg-zinc-900/80 backdrop-blur-sm rounded-3xl overflow-hidden border border-zinc-800 shadow-2xl">
         <div className="h-36 bg-linear-to-r from-indigo-600 via-purple-600 to-emerald-600"></div>
@@ -425,6 +458,13 @@ const Profile = () => {
                     <span className="-mt-1.5">
                       <StatusIndicator status={statusMap[user._id]} />
                     </span>
+                  )}
+                  {isPublicProfile && !isViewingSelf && (
+                    <ChallengeButton
+                      status={statusMap[user._id]}
+                      onClick={() => handleOpenChallenge(user)}
+                      className="mt-2"
+                    />
                   )}
                 </h1>
                 <div className="flex items-center justify-center md:justify-start gap-2 text-zinc-400">
@@ -564,8 +604,18 @@ const Profile = () => {
                             <div className="w-9 h-9 shrink-0 bg-linear-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-400 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-inner">
                               {requestUser.username.charAt(0)}
                             </div>
-                            <span className="font-medium text-zinc-200 text-sm truncate">
-                              {requestUser.username}
+                            <span className="min-w-0">
+                              <span className="font-medium text-zinc-200 text-sm truncate block">
+                                {requestUser.username}
+                              </span>
+                              {getHighestElo(requestUser.stats) !== null && (
+                                <span className="block text-[11px] font-mono text-zinc-500">
+                                  Highest Elo:{" "}
+                                  <span className="text-zinc-400">
+                                    {getHighestElo(requestUser.stats)}
+                                  </span>
+                                </span>
+                              )}
                             </span>
                           </button>
 
@@ -678,39 +728,61 @@ const Profile = () => {
                                 <div className="w-9 h-9 shrink-0 bg-linear-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 text-indigo-400 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-inner">
                                   {result.username.charAt(0)}
                                 </div>
-                                <span className="font-medium text-zinc-200 text-sm truncate">
-                                  {result.username}
+                                <span className="min-w-0">
+                                  <span className="flex items-center gap-2">
+                                    <span className="font-medium text-zinc-200 text-sm truncate">
+                                      {result.username}
+                                    </span>
+                                    <StatusIndicator
+                                      status={statusMap[result._id]}
+                                      className="ml-2 mt-1.5 shrink-0 whitespace-nowrap"
+                                    />
+                                  </span>
+                                  {getHighestElo(result.stats) !== null && (
+                                    <span className="block text-[11px] font-mono text-zinc-400">
+                                      Rating:{" "}
+                                      <span className="text-zinc-300">
+                                        {getHighestElo(result.stats)}
+                                      </span>
+                                    </span>
+                                  )}
                                 </span>
-                                <StatusIndicator status={statusMap[result._id]} />
                               </button>
 
-                              {result.isFriend ? (
-                                <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-400 shrink-0">
-                                  <UserCheck className="w-4 h-4" />
-                                  Friends
-                                </span>
-                              ) : result.requestSentByMe ? (
-                                <span className="px-3 py-1.5 text-xs font-medium text-zinc-500 shrink-0">
-                                  Requested
-                                </span>
-                              ) : result.requestReceivedFromThem ? (
-                                <span className="px-3 py-1.5 text-xs font-medium text-amber-400 shrink-0">
-                                  Sent you a request
-                                </span>
-                              ) : (
-                                <button
-                                  onClick={() => handleSendRequest(result)}
-                                  disabled={isRequesting}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/10 hover:bg-emerald-600 border border-emerald-500/30 hover:border-emerald-600 text-emerald-400 hover:text-white rounded-lg font-medium text-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
-                                >
-                                  {isRequesting ? (
-                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                  ) : (
-                                    <UserPlus className="w-3.5 h-3.5" />
-                                  )}
-                                  Add
-                                </button>
-                              )}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <ChallengeButton
+                                  status={statusMap[result._id]}
+                                  onClick={() => handleOpenChallenge(result)}
+                                />
+
+                                {result.isFriend ? (
+                                  <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-emerald-400">
+                                    <UserCheck className="w-4 h-4" />
+                                    Friends
+                                  </span>
+                                ) : result.requestSentByMe ? (
+                                  <span className="px-3 py-1.5 text-xs font-medium text-zinc-500">
+                                    Requested
+                                  </span>
+                                ) : result.requestReceivedFromThem ? (
+                                  <span className="px-3 py-1.5 text-xs font-medium text-amber-400">
+                                    Sent you a request
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => handleSendRequest(result)}
+                                    disabled={isRequesting}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/10 hover:bg-emerald-600 border border-emerald-500/30 hover:border-emerald-600 text-emerald-400 hover:text-white rounded-lg font-medium text-xs transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                                  >
+                                    {isRequesting ? (
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                      <UserPlus className="w-3.5 h-3.5" />
+                                    )}
+                                    Add
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           );
                         })
@@ -743,26 +815,48 @@ const Profile = () => {
                           onClick={() =>
                             navigate(`/profile/${friend.username}`)
                           }
-                          className="flex items-center gap-3 hover:opacity-80 transition-opacity flex-1 text-left"
+                          className="flex items-center gap-3 hover:opacity-80 transition-opacity flex-1 text-left min-w-0"
                         >
-                          <div className="w-9 h-9 bg-linear-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 text-emerald-400 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-inner">
+                          <div className="w-9 h-9 shrink-0 bg-linear-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 text-emerald-400 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-inner">
                             {friend.username.charAt(0)}
                           </div>
-                          <span className="font-medium text-zinc-200 text-sm truncate cursor-pointer">
-                            {friend.username}
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-2">
+                              <span className="font-medium text-zinc-200 text-sm truncate cursor-pointer">
+                                {friend.username}
+                              </span>
+                              <StatusIndicator
+                                status={statusMap[friend._id]}
+                                className="ml-2 mt-1.5 shrink-0 whitespace-nowrap"
+                              />
+                            </span>
+                            {getHighestElo(friend.stats) !== null && (
+                              <span className="block text-[11px] font-mono text-zinc-400">
+                                Rating:{" "}
+                                <span className="text-zinc-300">
+                                  {getHighestElo(friend.stats)}
+                                </span>
+                              </span>
+                            )}
                           </span>
-                          <StatusIndicator status={statusMap[friend._id]} />
                         </button>
 
-                        {!isPublicProfile && (
-                          <button
-                            onClick={() => handleRemoveFriend(friend._id)}
-                            className="p-2 text-zinc-600 hover:text-rose-400 hover:bg-rose-400/10 rounded-lg transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
-                            title="Remove friend"
-                          >
-                            <UserMinus className="w-4 h-4" />
-                          </button>
-                        )}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <ChallengeButton
+                            status={statusMap[friend._id]}
+                            onClick={() => handleOpenChallenge(friend)}
+                          />
+
+                          {!isPublicProfile && (
+                            <button
+                              onClick={() => handleRemoveFriend(friend._id)}
+                              className="p-2 text-zinc-600 hover:text-rose-400 hover:bg-rose-400/10 rounded-lg transition-all opacity-0 group-hover:opacity-100 focus:opacity-100"
+                              title="Remove friend"
+                            >
+                              <UserMinus className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))
                   )}

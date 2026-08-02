@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Chess } from "chess.js";
 import { Trophy, Scale, XCircle } from "lucide-react";
 import { ZoomIn } from "react-feather";
@@ -71,6 +71,7 @@ const calculateGameType = (baseInSeconds, incrementInSeconds) => {
 
 const Play = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, setUser, loading: authLoading } = useAuth();
 
   const [guestUser, setGuestUser] = useState(null);
@@ -197,6 +198,88 @@ const Play = () => {
     groupedWhitePieces,
     groupedBlackPieces,
   } = useCapturedPieces(game.fen());
+
+  // Applies a freshly-started multiplayer room to local state. Used both by
+  // the matchmaking lobby (MultiplayerTester's onGameStarted prop, while the
+  // player is already on this page) and by the direct-challenge route-state
+  // effect below (which can land here from any other page). From this point
+  // on a challenge-originated game is indistinguishable from a matchmade
+  // one — same state shape, same reconnect/draw/resign/game-over/DB-save
+  // paths further down this file.
+  const applyMultiplayerGameStart = ({
+    roomId: newRoomId,
+    color,
+    whiteName,
+    blackName,
+    whiteRating,
+    blackRating,
+    whiteId,
+    blackId,
+    timeControl: newTimeControl,
+    whiteTimeRemaining,
+    blackTimeRemaining,
+    isRated: roomIsRated,
+  }) => {
+    if (typeof roomIsRated === "boolean") {
+      setIsRated(roomIsRated);
+    }
+    resetClock();
+    setGame(new Chess());
+    setMoves([]);
+    setLastMove(null);
+    resetCapturedPieces();
+    setEndgame({ type: null, winner: null });
+    setGameResult("");
+
+    setIncomingDrawOffer(false);
+    setDrawOfferPending(false);
+
+    setWhitePlayerName(whiteName);
+    setBlackPlayerName(blackName);
+    setWhitePlayerRating(whiteRating);
+    setBlackPlayerRating(blackRating);
+    setWhitePlayerId(whiteId);
+    setBlackPlayerId(blackId);
+    setTimeControl(newTimeControl);
+    setMultiplayerWhiteTime(whiteTimeRemaining);
+    setMultiplayerBlackTime(blackTimeRemaining);
+
+    setRoomId(newRoomId);
+    setMultiplayerColor(color);
+    setGameMode("multiplayer");
+    setGameStarted(true);
+    setBoardKey((prev) => prev + 1);
+    setShowMultiplayerLobby(false);
+
+    try {
+      chessSounds.playGameStartSound();
+    } catch (err) {
+      console.warn("Autoplay blocked until user interact with document.");
+    }
+
+    localStorage.setItem("multiplayerRoomId", newRoomId);
+    localStorage.setItem("multiplayerColor", color);
+  };
+
+  // A challenge accepted anywhere in the app routes the player here with
+  // the new room's data in router state (see ChallengeNotificationCenter).
+  // Apply it once per navigation, and skip re-applying if this room was
+  // already picked up locally (e.g. the matchmaking lobby modal's own
+  // "game-started" listener got to it first while this page was already
+  // open).
+  const appliedGameStartKeyRef = useRef(null);
+  useEffect(() => {
+    const incomingGameStart = location.state?.multiplayerGameStart;
+    const navKey = location.state?.navKey;
+    if (!incomingGameStart || !navKey) return;
+    if (appliedGameStartKeyRef.current === navKey) return;
+
+    appliedGameStartKeyRef.current = navKey;
+
+    if (roomId === incomingGameStart.roomId) return;
+
+    applyMultiplayerGameStart(incomingGameStart);
+  }, [location.state, roomId]);
 
   const flipBoard = () => {
     setBoardOrientation((prev) => (prev === "white" ? "black" : "white"));
@@ -2016,62 +2099,7 @@ const Play = () => {
             onClose={() => setShowMultiplayerLobby(false)}
             setMultiplayerBlackTime={setMultiplayerBlackTime}
             setMultiplayerWhiteTime={setMultiplayerWhiteTime}
-            onGameStarted={({
-              roomId,
-              color,
-              whiteName,
-              blackName,
-              whiteRating,
-              blackRating,
-              whiteId,
-              blackId,
-              timeControl,
-              whiteTimeRemaining,
-              blackTimeRemaining,
-              isRated: roomIsRated,
-            }) => {
-              if (typeof roomIsRated === "boolean") {
-                setIsRated(roomIsRated);
-              }
-              resetClock();
-              setGame(new Chess());
-              setMoves([]);
-              setLastMove(null);
-              resetCapturedPieces();
-              setEndgame({ type: null, winner: null });
-              setGameResult("");
-
-              setIncomingDrawOffer(false);
-              setDrawOfferPending(false);
-
-              setWhitePlayerName(whiteName);
-              setBlackPlayerName(blackName);
-              setWhitePlayerRating(whiteRating);
-              setBlackPlayerRating(blackRating);
-              setWhitePlayerId(whiteId);
-              setBlackPlayerId(blackId);
-              setTimeControl(timeControl);
-              setMultiplayerWhiteTime(whiteTimeRemaining);
-              setMultiplayerBlackTime(blackTimeRemaining);
-
-              setRoomId(roomId);
-              setMultiplayerColor(color);
-              setGameMode("multiplayer");
-              setGameStarted(true);
-              setBoardKey((prev) => prev + 1);
-              setShowMultiplayerLobby(false);
-
-              try {
-                chessSounds.playGameStartSound();
-              } catch (err) {
-                console.warn(
-                  "Autoplay blocked until user interact with document.",
-                );
-              }
-
-              localStorage.setItem("multiplayerRoomId", roomId);
-              localStorage.setItem("multiplayerColor", color);
-            }}
+            onGameStarted={applyMultiplayerGameStart}
           />
         </div>
       )}

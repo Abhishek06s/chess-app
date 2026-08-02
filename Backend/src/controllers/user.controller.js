@@ -1,4 +1,5 @@
 const User = require("../models/user.model");
+const { emitToUser } = require("../../socket/socket");
 
 /**
  * Get Profile
@@ -8,9 +9,9 @@ const getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
       .select("-password")
-      .populate("friends", "username")
-      .populate("friendRequests.received", "username")
-      .populate("friendRequests.sent", "username");
+      .populate("friends", "username stats")
+      .populate("friendRequests.received", "username stats")
+      .populate("friendRequests.sent", "username stats");
 
     res.status(200).json({
       success: true,
@@ -82,7 +83,7 @@ const getUserByUsername = async (req, res) => {
       username: req.params.username,
     })
       .select("-password")
-      .populate("friends", "username");
+      .populate("friends", "username stats");
 
     if (!user) {
       return res.status(404).json({
@@ -125,7 +126,7 @@ const searchUsers = async (req, res) => {
       username: { $regex: `^${query}`, $options: "i" },
       _id: { $ne: req.user._id },
     })
-      .select("username stats.rapid.rating friends friendRequests")
+      .select("username stats friends friendRequests")
       .limit(10);
 
     const currentUserId = req.user._id.toString();
@@ -145,6 +146,7 @@ const searchUsers = async (req, res) => {
         _id: user._id,
         username: user.username,
         rating: user.stats?.rapid?.rating,
+        stats: user.stats,
         isFriend,
         requestSentByMe,
         requestReceivedFromThem,
@@ -171,7 +173,7 @@ const getPendingRequests = async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
       .select("friendRequests")
-      .populate("friendRequests.received", "username");
+      .populate("friendRequests.received", "username stats");
 
     res.status(200).json({
       success: true,
@@ -250,6 +252,16 @@ const sendFriendRequest = async (req, res) => {
 
     await Promise.all([currentUser.save(), targetUser.save()]);
 
+    // Push a real-time notification to the target user if they're
+    // currently online, so it shows up instantly in their notification bell.
+    emitToUser(userId, "friend-request-received", {
+      from: {
+        _id: currentUser._id,
+        username: currentUser.username,
+        stats: currentUser.stats,
+      },
+    });
+
     res.status(200).json({
       success: true,
       message: "Friend request sent",
@@ -309,6 +321,12 @@ const acceptFriendRequest = async (req, res) => {
     senderUser.friends.push(currentUserId);
 
     await Promise.all([currentUser.save(), senderUser.save()]);
+
+    // Let the original sender know (in real time) that their request was
+    // accepted, in case they're currently online.
+    emitToUser(userId, "friend-request-accepted", {
+      by: { _id: currentUser._id, username: currentUser.username },
+    });
 
     res.status(200).json({
       success: true,

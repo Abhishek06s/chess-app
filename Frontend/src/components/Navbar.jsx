@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { toast } from "react-hot-toast";
 import { logoutUser } from "../services/auth.service";
 import { useAuth } from "../context/authContext";
+import NotificationBell from "./NotificationBell";
 
 const Navbar = () => {
   const { user, logout, loading } = useAuth();
@@ -30,6 +31,8 @@ const Navbar = () => {
         <NavLink to="/leaderboard">Leaderboard</NavLink>
 
         {!loading && user && <NavLink to="/profile">Profile</NavLink>}
+
+        {!loading && user && <NotificationBell />}
 
         {loading ? null : user ? (
           <button
