@@ -345,6 +345,18 @@ const Analysis = () => {
                 pgnHeaders[topCardColor === "white" ? "White" : "Black"] ||
                 (topCardColor === "white" ? "White" : "Black")
               }
+              onNameClick={
+                pgnHeaders[topCardColor === "white" ? "White" : "Black"]
+                  ? () =>
+                      navigate(
+                        `/profile/${encodeURIComponent(
+                          pgnHeaders[
+                            topCardColor === "white" ? "White" : "Black"
+                          ],
+                        )}`,
+                      )
+                  : undefined
+              }
               rating={
                 pgnHeaders[
                   topCardColor === "white" ? "WhiteElo" : "BlackElo"
@@ -414,6 +426,18 @@ const Analysis = () => {
                 pgnHeaders[
                   bottomCardColor === "white" ? "White" : "Black"
                 ] || (bottomCardColor === "white" ? "White" : "Black")
+              }
+              onNameClick={
+                pgnHeaders[bottomCardColor === "white" ? "White" : "Black"]
+                  ? () =>
+                      navigate(
+                        `/profile/${encodeURIComponent(
+                          pgnHeaders[
+                            bottomCardColor === "white" ? "White" : "Black"
+                          ],
+                        )}`,
+                      )
+                  : undefined
               }
               rating={
                 pgnHeaders[

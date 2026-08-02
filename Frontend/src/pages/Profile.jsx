@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   getProfile,
@@ -11,6 +11,9 @@ import {
   removeFriend,
 } from "../services/user.service";
 import { getMyGames, getGamesByUserId } from "../services/game.service";
+import { useAuth } from "../context/authContext";
+import usePresence from "../hooks/usePresence";
+import StatusIndicator from "../components/StatusIndicator";
 import {
   Trophy,
   Swords,
@@ -165,6 +168,7 @@ const Profile = () => {
   const navigate = useNavigate();
   const { username } = useParams();
   const isPublicProfile = !!username;
+  const { user: authUser } = useAuth();
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -192,6 +196,24 @@ const Profile = () => {
 
   // Toasts
   const [toasts, setToasts] = useState([]);
+
+  // Live presence (online / offline / in-game) for the friends list, the
+  // "search & add friends" results, and — when viewing someone else's
+  // profile — the profile owner themself.
+  const isViewingSelf =
+    isPublicProfile && authUser && user && authUser._id === user._id;
+
+  const presenceIds = useMemo(() => {
+    const ids = new Set();
+    friends.forEach((friend) => friend._id && ids.add(friend._id));
+    searchResults.forEach((result) => result._id && ids.add(result._id));
+    if (isPublicProfile && user?._id && !isViewingSelf) {
+      ids.add(user._id);
+    }
+    return Array.from(ids);
+  }, [friends, searchResults, user, isPublicProfile, isViewingSelf]);
+
+  const statusMap = usePresence(presenceIds);
 
   const showToast = (message, type = "success") => {
     const id = Date.now() + Math.random();
@@ -397,11 +419,11 @@ const Profile = () => {
               </div>
 
               <div className="space-y-1 md:-mb-1">
-                <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-linear-to-r from-white to-zinc-400">
+                <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-linear-to-r from-white to-zinc-400 flex items-center flex-wrap gap-3">
                   {user.username}
-                  {isPublicProfile && username !== user.username && (
-                    <span className="text-sm bg-zinc-900 px-2 py-1 ml-5 rounded-md text-zinc-300/60">
-                      Public Profile
+                  {isPublicProfile && !isViewingSelf && (
+                    <span className="-mt-1.5">
+                      <StatusIndicator status={statusMap[user._id]} />
                     </span>
                   )}
                 </h1>
@@ -477,7 +499,7 @@ const Profile = () => {
       {/* Friend Requests Section — only visible on the logged-in user's own profile */}
       {!isPublicProfile && (
         <div className="w-full max-w-4xl">
-          <div className="bg-zinc-900/60 backdrop-blur-md border border-zinc-800/80 rounded-3xl overflow-hidden shadow-xl mb-6">
+          <div className="bg-zinc-900/60 backdrop-blur-md border border-zinc-800/80 rounded-3xl overflow-hidden shadow-xl mb-2">
             <button
               onClick={() => setShowPendingRequests(!showPendingRequests)}
               className="w-full flex items-center justify-between p-6 cursor-pointer hover:bg-zinc-800/20 transition-all duration-200"
@@ -632,7 +654,7 @@ const Profile = () => {
                   </div>
 
                   {searchQuery.trim() && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                       {!searchLoading && searchResults.length === 0 ? (
                         <div className="col-span-full py-6 text-center text-zinc-500 text-sm">
                           No users found matching "{searchQuery}".
@@ -659,6 +681,7 @@ const Profile = () => {
                                 <span className="font-medium text-zinc-200 text-sm truncate">
                                   {result.username}
                                 </span>
+                                <StatusIndicator status={statusMap[result._id]} />
                               </button>
 
                               {result.isFriend ? (
@@ -704,7 +727,7 @@ const Profile = () => {
                     Your Friends
                   </h3>
                 )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {friends.length === 0 ? (
                     <div className="col-span-full py-8 text-center text-zinc-500 flex flex-col items-center gap-2">
                       <Users className="w-8 h-8 opacity-20" />
@@ -728,6 +751,7 @@ const Profile = () => {
                           <span className="font-medium text-zinc-200 text-sm truncate cursor-pointer">
                             {friend.username}
                           </span>
+                          <StatusIndicator status={statusMap[friend._id]} />
                         </button>
 
                         {!isPublicProfile && (

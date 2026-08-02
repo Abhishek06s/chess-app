@@ -14,6 +14,44 @@ const botGames = {};
 // Each entry: { socketId, userId, username, rating, rd, timeControl, isRated, gameType, joinedAt }
 const matchmakingQueues = {};
 
+// ── Presence tracking (online / offline / in-game) ──────────────────────────
+// userId -> Set of connected socketIds. A user can have several tabs open,
+// so "offline" only fires once the LAST socket for that user disconnects.
+const onlineUsers = {};
+// userId -> Set of roomIds the user is currently an active (non-guest)
+// player in. Non-empty means "in-game" regardless of onlineUsers, since a
+// mid-game disconnect keeps the room (and the reconnect window) alive.
+const inGameUsers = {};
+
+function computeUserStatus(userId) {
+  if (!userId) return "offline";
+  if (inGameUsers[userId] && inGameUsers[userId].size > 0) return "in-game";
+  if (onlineUsers[userId] && onlineUsers[userId].size > 0) return "online";
+  return "offline";
+}
+
+// Broadcast a single user's current status to everyone connected. There's
+// no per-friend subscription mechanism, so this is a simple global emit —
+// clients filter for the userIds they care about.
+function broadcastPresence(userId) {
+  if (!userId || !io) return;
+  io.emit("presence-update", { userId, status: computeUserStatus(userId) });
+}
+
+function markUserInGame(userId, roomId) {
+  if (!userId) return;
+  if (!inGameUsers[userId]) inGameUsers[userId] = new Set();
+  inGameUsers[userId].add(roomId);
+  broadcastPresence(userId);
+}
+
+function unmarkUserInGame(userId, roomId) {
+  if (!userId || !inGameUsers[userId]) return;
+  inGameUsers[userId].delete(roomId);
+  if (inGameUsers[userId].size === 0) delete inGameUsers[userId];
+  broadcastPresence(userId);
+}
+
 let io;
 
 const ROOM_ID_CHARS =
@@ -129,6 +167,8 @@ function cleanUpRoom(roomId) {
       clearTimeout(room.cleanupTimeout);
     }
     console.log(`Cleaning up and deleting room: ${roomId}`);
+    unmarkUserInGame(room.whiteUserId, roomId);
+    unmarkUserInGame(room.blackUserId, roomId);
     delete rooms[roomId];
   }
 }
@@ -225,6 +265,10 @@ const initializeSocket = (server) => {
     blackSocket.join(roomId);
 
     const room = rooms[roomId];
+
+    // Guests have no userId and are never presence-tracked.
+    markUserInGame(room.whiteUserId, roomId);
+    markUserInGame(room.blackUserId, roomId);
 
     io.to(roomId).emit("game-started", {
       room,
@@ -487,7 +531,24 @@ const initializeSocket = (server) => {
     const authedUserId = getUserIdFromSocket(socket);
     if (authedUserId) {
       socket.join(getBotRoomName(authedUserId));
+
+      if (!onlineUsers[authedUserId]) onlineUsers[authedUserId] = new Set();
+      onlineUsers[authedUserId].add(socket.id);
+      broadcastPresence(authedUserId);
     }
+
+    // ── Presence queries ─────────────────────────────────────────────────────
+    // Batch lookup used by clients to get the current status for a list of
+    // userIds (friends list, leaderboard rows, paired opponent, etc). Live
+    // updates after this initial snapshot arrive via "presence-update".
+    socket.on("get-presence", (userIds, callback) => {
+      const ids = Array.isArray(userIds) ? userIds : [];
+      const statuses = {};
+      ids.forEach((id) => {
+        if (id) statuses[String(id)] = computeUserStatus(String(id));
+      });
+      if (typeof callback === "function") callback(statuses);
+    });
 
     // ── Matchmaking ──────────────────────────────────────────────────────────
     // Replaces the old create-room/join-room "share a code" flow. Players
@@ -1077,6 +1138,16 @@ const initializeSocket = (server) => {
           } else {
             botState.engineOwnerSocketId = null;
           }
+        }
+
+        // Drop this tab from the presence set; only flips to "offline" once
+        // every tab for this user has disconnected.
+        if (onlineUsers[disconnectedUserId]) {
+          onlineUsers[disconnectedUserId].delete(socket.id);
+          if (onlineUsers[disconnectedUserId].size === 0) {
+            delete onlineUsers[disconnectedUserId];
+          }
+          broadcastPresence(disconnectedUserId);
         }
       }
 

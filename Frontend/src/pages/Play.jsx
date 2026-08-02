@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Chess } from "chess.js";
 import { Trophy, Scale, XCircle } from "lucide-react";
@@ -11,6 +11,7 @@ import MultiplayerTester from "../components/MultiplayerTester";
 
 import useChessClock from "../hooks/useChessClock";
 import useCapturedPieces from "../hooks/useCapturedPieces";
+import usePresence from "../hooks/usePresence";
 import { generateGuestUser } from "../utils/guestUtil";
 import { useAuth } from "../context/authContext";
 import useChessSounds from "../hooks/useChessSounds";
@@ -230,6 +231,21 @@ const Play = () => {
       : boardOrientation === "white"
         ? "black"
         : "white";
+
+  // ── Live presence for paired players ─────────────────────────────────────
+  // Guests have no userId and simply won't get a live status (falls back to
+  // the card's default "offline" styling handled by StatusIndicator).
+  const multiplayerPresenceIds = useMemo(
+    () => [whitePlayerId, blackPlayerId].filter(Boolean),
+    [whitePlayerId, blackPlayerId],
+  );
+  const presenceStatusMap = usePresence(multiplayerPresenceIds);
+
+  const getStatusForColor = (colorLabel) => {
+    if (gameMode !== "multiplayer") return undefined;
+    const playerId = colorLabel === "white" ? whitePlayerId : blackPlayerId;
+    return playerId ? presenceStatusMap[playerId] : undefined;
+  };
 
   const whiteAbortStatusText = whiteAbortCountdown
     ? `Auto aborting in ${whiteAbortCountdown}s`
@@ -972,10 +988,8 @@ const Play = () => {
       // ── Resolve the White/Black names & Elos that belong in the PGN
       // tags, regardless of whether this was a multiplayer or bot game ──
       const botTier = getBotDifficulty(currentBotDifficulty);
-      const humanName =
-        currentUser.username || currentUser.name || "Player";
-      const humanRating =
-        currentUser.stats?.[currentGameType]?.rating ?? null;
+      const humanName = currentUser.username || currentUser.name || "Player";
+      const humanRating = currentUser.stats?.[currentGameType]?.rating ?? null;
 
       const pgnWhiteName = isMultiplayer
         ? currentWhitePlayerName || "White"
@@ -989,12 +1003,12 @@ const Play = () => {
           : `${botTier.label} Bot`;
 
       const pgnWhiteElo = isMultiplayer
-        ? currentWhitePlayerRating ?? null
+        ? (currentWhitePlayerRating ?? null)
         : currentPlayerColor === "white"
           ? humanRating
           : botTier.elo;
       const pgnBlackElo = isMultiplayer
-        ? currentBlackPlayerRating ?? null
+        ? (currentBlackPlayerRating ?? null)
         : currentPlayerColor === "black"
           ? humanRating
           : botTier.elo;
@@ -1760,6 +1774,18 @@ const Play = () => {
                   : "Searching for Opponent..."
                 : `${getBotDifficulty(botDifficulty).label} Bot (${topCardColor === "white" ? "White" : "Black"})`
             }
+            onNameClick={
+              gameMode === "multiplayer" && isGameOver
+                ? () =>
+                    navigate(
+                      `/profile/${encodeURIComponent(
+                        topCardColor === "white"
+                          ? whitePlayerName
+                          : blackPlayerName,
+                      )}`,
+                    )
+                : undefined
+            }
             rating={
               gameMode === "multiplayer"
                 ? topCardColor === "white"
@@ -1771,6 +1797,7 @@ const Play = () => {
               topCardColor === "white" ? whiteRatingChange : blackRatingChange
             }
             isOnline={true}
+            status={getStatusForColor(topCardColor)}
             color={topCardColor}
             showClock={gameMode === "multiplayer"}
             time={
@@ -1860,6 +1887,7 @@ const Play = () => {
                 : blackRatingChange
             }
             isOnline={true}
+            status={getStatusForColor(bottomCardColor)}
             color={bottomCardColor}
             showClock={gameMode === "multiplayer"}
             time={

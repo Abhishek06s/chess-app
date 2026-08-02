@@ -1,9 +1,12 @@
 import React from "react";
+import { ExternalLink } from "lucide-react";
+import StatusIndicator from "./StatusIndicator";
 
 const PlayerCard = ({
   name,
   rating,
   isOnline,
+  status,
   color,
   time,
   isActive,
@@ -13,6 +16,7 @@ const PlayerCard = ({
   ratingChange = null,
   showClock = true,
   showOnlineDot = true,
+  onNameClick,
 }) => {
   const formatTime = (ms = 0) => {
     if (typeof ms !== "number" || Number.isNaN(ms)) {
@@ -92,7 +96,24 @@ const PlayerCard = ({
                 : "bg-black border border-white"
             }`}
           />
-          <h2>{name}</h2>
+          {onNameClick ? (
+            <button
+              onClick={onNameClick}
+              className="group/name flex items-center gap-1.5 text-left rounded-md outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 cursor-pointer transition-all duration-200"
+              aria-label={`View ${name}'s profile`}
+            >
+              <h2 className="text-base md:text-lg font-bold text-zinc-100 decoration-indigo-400/40 decoration-2 underline-offset-4 group-hover/name:underline group-hover/name:text-indigo-400 transition-all duration-200">
+                {name}
+              </h2>
+              <span className="flex items-center text-zinc-500 group-hover/name:text-indigo-400 transition-all duration-300 transform -translate-x-1 translate-y-1 group-hover/name:translate-x-0 group-hover/name:-translate-y-0">
+                <ExternalLink className="w-4 h-4 opacity-0 group-hover/name:opacity-100 transition-opacity duration-300" />
+              </span>
+            </button>
+          ) : (
+            <h2 className="text-base md:text-lg font-bold text-zinc-100">
+              {name}
+            </h2>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -153,13 +174,16 @@ const PlayerCard = ({
             {formatTime(time)}
           </p>
         )}
-        {showOnlineDot && (
-          <div
-            className={`w-3 h-3 rounded-full ${
-              isOnline ? "bg-green-500" : "bg-red-500"
-            }`}
-          />
-        )}
+        {showOnlineDot &&
+          (status ? (
+            <StatusIndicator status={status} />
+          ) : (
+            <div
+              className={`w-3 h-3 rounded-full ${
+                isOnline ? "bg-green-500" : "bg-red-500"
+              }`}
+            />
+          ))}
       </div>
     </div>
   );

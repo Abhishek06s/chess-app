@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, forwardRef } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { analyzePosition } from "../services/stockfishService";
 import { generateGameReview } from "../utils/gameReview";
 import { Chessboard } from "react-chessboard";
@@ -26,6 +26,7 @@ import { Star, Check, ThumbsUp, BookOpen, X, KeyRound } from "lucide-react";
 
 const GameReview = () => {
   const { state } = useLocation();
+  const navigate = useNavigate();
 
   const [isReviewing, setIsReviewing] = useState(false);
   const [reviewData, setReviewData] = useState([]);
@@ -487,6 +488,18 @@ const GameReview = () => {
                 pgnHeaders[topCardColor === "white" ? "White" : "Black"] ||
                 (topCardColor === "white" ? "White" : "Black")
               }
+              onNameClick={
+                pgnHeaders[topCardColor === "white" ? "White" : "Black"]
+                  ? () =>
+                      navigate(
+                        `/profile/${encodeURIComponent(
+                          pgnHeaders[
+                            topCardColor === "white" ? "White" : "Black"
+                          ],
+                        )}`,
+                      )
+                  : undefined
+              }
               rating={
                 pgnHeaders[
                   topCardColor === "white" ? "WhiteElo" : "BlackElo"
@@ -554,6 +567,18 @@ const GameReview = () => {
               name={
                 pgnHeaders[bottomCardColor === "white" ? "White" : "Black"] ||
                 (bottomCardColor === "white" ? "White" : "Black")
+              }
+              onNameClick={
+                pgnHeaders[bottomCardColor === "white" ? "White" : "Black"]
+                  ? () =>
+                      navigate(
+                        `/profile/${encodeURIComponent(
+                          pgnHeaders[
+                            bottomCardColor === "white" ? "White" : "Black"
+                          ],
+                        )}`,
+                      )
+                  : undefined
               }
               rating={
                 pgnHeaders[

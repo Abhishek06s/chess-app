@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { getLeaderboard } from "../services/user.service";
 import { Trophy, Medal, ChevronDown } from "lucide-react";
 import { NavLink } from "react-router-dom";
+import usePresence from "../hooks/usePresence";
+import StatusIndicator from "../components/StatusIndicator";
 
 const Leaderboard = () => {
   const [players, setPlayers] = useState([]);
@@ -34,6 +36,14 @@ const Leaderboard = () => {
       return Math.min(prev + 10, 100);
     });
   };
+
+  // Hooks must run unconditionally on every render, so this is computed
+  // before the loading early-return below (not after it).
+  const presenceIds = useMemo(
+    () => players.slice(0, visibleCount).map((player) => player._id),
+    [players, visibleCount],
+  );
+  const statusMap = usePresence(presenceIds);
 
   if (loading && players.length === 0) {
     return (
@@ -134,12 +144,15 @@ const Leaderboard = () => {
 
                     {/* Player Name */}
                     <td className="p-5 font-medium text-zinc-100 group-hover:text-emerald-400 transition-colors">
-                      <NavLink
-                        to={`/profile/${player.username}`}
-                        className="hover:text-indigo-400 transition-colors"
-                      >
-                        {player.username}
-                      </NavLink>
+                      <div className="flex items-center gap-3">
+                        <NavLink
+                          to={`/profile/${player.username}`}
+                          className="hover:text-indigo-400 transition-colors"
+                        >
+                          {player.username}
+                        </NavLink>
+                        <StatusIndicator status={statusMap[player._id]} />
+                      </div>
                     </td>
 
                     {/* Rating */}
