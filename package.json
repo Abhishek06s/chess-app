@@ -1,0 +1,24 @@
+{
+  "name": "chess-app",
+  "version": "1.0.0",
+  "description": "A full-stack, real-time chess platform. Play against **Stockfish** bots or challenge other players live over WebSockets, then dig into a **post-game analysis and review engine** to see where the game turned. Built with a React/Vite frontend and a Node.js/Express + MongoDB backend.",
+  "main": "index.js",
+  "scripts": {
+    "start-all": "concurrently \"npm run dev --prefix backend\" \"npm run dev --prefix frontend\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Abhishek06s/chess-app.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Abhishek06s/chess-app/issues"
+  },
+  "homepage": "https://github.com/Abhishek06s/chess-app#readme",
+  "devDependencies": {
+    "concurrently": "^10.0.4"
+  }
+}
