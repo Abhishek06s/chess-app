@@ -267,6 +267,7 @@ const Play = () => {
   // already picked up locally (e.g. the matchmaking lobby modal's own
   // "game-started" listener got to it first while this page was already
   // open).
+  
   const appliedGameStartKeyRef = useRef(null);
   useEffect(() => {
     const incomingGameStart = location.state?.multiplayerGameStart;
@@ -276,10 +277,18 @@ const Play = () => {
 
     appliedGameStartKeyRef.current = navKey;
 
-    if (roomId === incomingGameStart.roomId) return;
+    if (roomId !== incomingGameStart.roomId) {
+      applyMultiplayerGameStart(incomingGameStart);
+    }
 
-    applyMultiplayerGameStart(incomingGameStart);
+    // One-shot: strip this payload from the current history entry so it
+    // can never be re-applied by a later refresh/remount.
+    navigate(location.pathname + location.search + location.hash, {
+      replace: true,
+      state: {},
+    });
   }, [location.state, roomId]);
+
 
   const flipBoard = () => {
     setBoardOrientation((prev) => (prev === "white" ? "black" : "white"));
@@ -381,6 +390,8 @@ const Play = () => {
   // ── Rating display before game starts ──────────────────────────────────────
 
   useEffect(() => {
+    if (location.state?.multiplayerGameStart) return;
+
     if (!gameStarted && !isGameOver && activeUser) {
       const userRating =
         activeUser.stats?.[gameType]?.rating || activeUser.rating || 1200;
@@ -411,6 +422,7 @@ const Play = () => {
     playerColor,
     gameStarted,
     isGameOver,
+    location.state,
   ]);
 
   const assignBotGameRatings = (resolvedColor) => {
@@ -591,24 +603,6 @@ const Play = () => {
       setMultiplayerColor(roomState.playerColor);
       setPlayerColor(roomState.playerColor);
       setBoardOrientation(roomState.playerColor);
-
-      localStorage.setItem("multiplayerRoomId", roomState.roomId);
-      localStorage.setItem("multiplayerColor", roomState.playerColor);
-    }
-
-    if (!roomState.gameOver) {
-      try {
-        chessSounds.playGameStartSound();
-      } catch (error) {
-        console.warn("Autoplay blocked until user interacts with document.");
-      }
-    } else if (roomState.termination === "abandonment") {
-      const winnerText = roomState.winner === "w" ? "White" : "Black";
-      setGameResult(`🏆 ${winnerText} Wins by Abandonment`);
-      setEndgame({ type: "abandonment", winner: roomState.winner });
-    } else if (roomState.termination === "abort") {
-      setGameResult("❌ Game Aborted");
-      setEndgame({ type: "abort", winner: null });
     }
   };
 
@@ -690,6 +684,7 @@ const Play = () => {
 
     const handleRestoreFailed = () => {
       setPendingReconnect(false);
+      clearStoredMultiplayerSession();
     };
 
     socket.on("player-reconnected", handlePlayerReconnected);
@@ -832,6 +827,8 @@ const Play = () => {
   useEffect(() => {
     if (authLoading) return;
 
+    if (location.state?.multiplayerGameStart) return;
+
     const storedRoomId = localStorage.getItem("multiplayerRoomId");
     const storedColor = localStorage.getItem("multiplayerColor");
 
@@ -845,11 +842,15 @@ const Play = () => {
       setPendingSessionReconnect(true);
       setPendingReconnect(false);
     }
+
   }, [authLoading, user]);
 
   // ── RECONNECT INIT: read localStorage on mount ─────────────────────────────
 
   useEffect(() => {
+
+    if (location.state?.multiplayerGameStart) return;
+
     const storedRoomId = localStorage.getItem("multiplayerRoomId");
     const storedColor = localStorage.getItem("multiplayerColor");
     if (storedRoomId && storedColor) {

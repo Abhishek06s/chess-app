@@ -533,6 +533,13 @@ const initializeSocket = (server) => {
       io.to(roomId).emit("player-abandoned", { winner, disconnectedColor });
     }
 
+    // Presence should flip back to "online"/"offline" the instant the game
+    // is actually over, not 10s later when the room object gets swept —
+    // otherwise friends/onlookers see this user stuck "in-game" for the
+    // entire cleanup grace window (or longer, see reconnect-room below).
+    unmarkUserInGame(room.whiteUserId, roomId);
+    unmarkUserInGame(room.blackUserId, roomId);
+
     clearDisconnectState(room);
     room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
   };
@@ -615,6 +622,8 @@ const initializeSocket = (server) => {
           room.gameOver = true;
           room.termination = "abort";
           io.to(roomId).emit("game-aborted");
+          unmarkUserInGame(room.whiteUserId, roomId);
+          unmarkUserInGame(room.blackUserId, roomId);
           room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
           continue;
         }
@@ -627,6 +636,8 @@ const initializeSocket = (server) => {
           room.termination = "timeout";
           room.winner = "b";
           io.to(roomId).emit("timeout", { winner: "b" });
+          unmarkUserInGame(room.whiteUserId, roomId);
+          unmarkUserInGame(room.blackUserId, roomId);
           room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
         }
       } else {
@@ -636,6 +647,8 @@ const initializeSocket = (server) => {
           room.termination = "timeout";
           room.winner = "w";
           io.to(roomId).emit("timeout", { winner: "w" });
+          unmarkUserInGame(room.whiteUserId, roomId);
+          unmarkUserInGame(room.blackUserId, roomId);
           room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
         }
       }
@@ -1121,6 +1134,8 @@ const initializeSocket = (server) => {
         room.termination = "draw";
         room.winner = null;
         io.to(roomId).emit("draw-accepted",{ whiteSocketId: room.white });
+        unmarkUserInGame(room.whiteUserId, roomId);
+        unmarkUserInGame(room.blackUserId, roomId);
         cleanUpRoom(roomId);
       } else {
         io.to(roomId).emit("draw-declined");
@@ -1139,6 +1154,8 @@ const initializeSocket = (server) => {
         winner: winnerColor === "w" ? "white" : "black",
         whiteSocketId: room.white,
       });
+      unmarkUserInGame(room.whiteUserId, roomId);
+      unmarkUserInGame(room.blackUserId, roomId);
       room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
     });
 
@@ -1155,6 +1172,8 @@ const initializeSocket = (server) => {
 
       room.gameOver = true;
       io.to(roomId).emit("game-aborted");
+      unmarkUserInGame(room.whiteUserId, roomId);
+      unmarkUserInGame(room.blackUserId, roomId);
       room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
     });
 
@@ -1370,7 +1389,6 @@ const initializeSocket = (server) => {
         if (normalizedColor === "w") room.white = socket.id;
         else room.black = socket.id;
         socket.join(roomId);
-        clearCleanupTimeout(room);
       } else {
         socket.emit("room-restore-failed");
         return;
@@ -1456,6 +1474,8 @@ const initializeSocket = (server) => {
       const room = rooms[roomId];
       if (!room) return;
       room.gameOver = true;
+      unmarkUserInGame(room.whiteUserId, roomId);
+      unmarkUserInGame(room.blackUserId, roomId);
       room.cleanupTimeout = setTimeout(() => cleanUpRoom(roomId), 10000);
     });
 
@@ -1474,6 +1494,8 @@ const initializeSocket = (server) => {
         room.winner = winner || null;
         if (Array.isArray(moves)) room.moves = moves;
         if (typeof fen === "string") room.fen = fen;
+        unmarkUserInGame(room.whiteUserId, roomId);
+        unmarkUserInGame(room.blackUserId, roomId);
         io.to(roomId).emit("game-ended", {
           termination: room.termination,
           winner: room.winner,

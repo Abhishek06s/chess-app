@@ -6,26 +6,37 @@ import promoteSoundFile from "../assets/sounds/promote.mp3";
 import gameEndSoundFile from "../assets/sounds/game-end.mp3";
 import gameStartSoundFile from "../assets/sounds/game-start.mp3";
 
-const moveSound = new Audio(moveSoundFile);
-const captureSound = new Audio(captureSoundFile);
-const checkSound = new Audio(checkSoundFile);
-const castleSound = new Audio(castleSoundFile);
-const promoteSound = new Audio(promoteSoundFile);
-const gameEndSound = new Audio(gameEndSoundFile);
-const gameStartSound = new Audio(gameStartSoundFile);
+const createBaseAudio = (src) => {
+  const audio = new Audio(src);
+  audio.preload = "auto";
+  return audio;
+};
+
+const moveSound = createBaseAudio(moveSoundFile);
+const captureSound = createBaseAudio(captureSoundFile);
+const checkSound = createBaseAudio(checkSoundFile);
+const castleSound = createBaseAudio(castleSoundFile);
+const promoteSound = createBaseAudio(promoteSoundFile);
+const gameEndSound = createBaseAudio(gameEndSoundFile);
+const gameStartSound = createBaseAudio(gameStartSoundFile);
+
 
 const safePlay = (audioInstance) => {
   try {
-    audioInstance.currentTime = 0;
-    const playPromise = audioInstance.play();
-    
+    const node = audioInstance.cloneNode(true);
+    const playPromise = node.play();
+
     if (playPromise !== undefined) {
-      playPromise.catch((error) => {
+      playPromise.catch(() => {
         console.warn(
-          `[Audio] Playback deferred on ${audioInstance.src.split('/').pop()}: User interaction required.`
+          `[Audio] Playback deferred on ${audioInstance.src.split("/").pop()}: user interaction required.`,
         );
       });
     }
+
+    node.addEventListener("ended", () => {
+      node.src = "";
+    });
   } catch (err) {
     console.error("[Audio] Sound engine execution failure:", err);
   }

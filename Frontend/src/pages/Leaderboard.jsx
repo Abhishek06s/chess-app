@@ -175,11 +175,15 @@ const Leaderboard = () => {
                         >
                           {player.username}
                         </NavLink>
-                        {}<StatusIndicator status={statusMap[player._id]} />
-                        <ChallengeButton
-                          status={statusMap[player._id]}
-                          onClick={() => setChallengeTarget(player)}
-                        />
+                        {player._id !== authUser?._id && (
+                          <>
+                            <StatusIndicator status={statusMap[player._id]} />
+                            <ChallengeButton
+                              status={statusMap[player._id]}
+                              onClick={() => setChallengeTarget(player)}
+                            />
+                          </>
+                        )}
                       </div>
                     </td>
 
