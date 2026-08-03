@@ -7,25 +7,14 @@ const rooms = {};
 
 const botGames = {};
 
-// Matchmaking queue, bucketed by `${base}:${increment}:${isRated}` — an
-// EXACT time control match, not just the same broad category (bullet /
-// blitz / rapid). E.g. 3+0 and 3+2 are both "blitz" but must never be
-// paired together.
-// Each entry: { socketId, userId, username, rating, rd, timeControl, isRated, gameType, joinedAt }
 const matchmakingQueues = {};
 
-// Pending direct challenges (Challenge button -> ChallengeModal flow),
-// keyed by a generated challengeId. Each entry auto-expires after
-// CHALLENGE_TTL_MS if the target never responds.
-// Entry shape: { challengeId, challengerSocketId, challengerUserId,
-//   challengerUsername, challengerRating, targetUserId, timeControl,
-//   isRated, gameType, timeoutId }
 const challenges = {};
-const CHALLENGE_TTL_MS = 15000;
+const CHALLENGE_TOAST_MS = 15000;
+const CHALLENGE_BELL_MS = 45000;
+const CHALLENGE_TTL_MS = CHALLENGE_TOAST_MS + CHALLENGE_BELL_MS; // 60s total
 
 // ── Presence tracking (online / offline / in-game) ──────────────────────────
-// userId -> Set of connected socketIds. A user can have several tabs open,
-// so "offline" only fires once the LAST socket for that user disconnects.
 const onlineUsers = {};
 // userId -> Set of roomIds the user is currently an active (non-guest)
 // player in. Non-empty means "in-game" regardless of onlineUsers, since a
@@ -115,13 +104,108 @@ function generateChallengeId() {
   return `chal_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// Clears a pending challenge's auto-expiry timer and removes it from the
-// store. Safe to call on an already-removed id.
+// Clears a pending challenge's timers (both the toast->bell transition and
+// the final auto-decline) and removes it from the store. Safe to call on
+// an already-removed id.
 function clearChallenge(challengeId) {
   const challenge = challenges[challengeId];
   if (!challenge) return;
-  if (challenge.timeoutId) clearTimeout(challenge.timeoutId);
+  if (challenge.toastTimeoutId) clearTimeout(challenge.toastTimeoutId);
+  if (challenge.expireTimeoutId) clearTimeout(challenge.expireTimeoutId);
   delete challenges[challengeId];
+}
+
+// Whether this user currently has an outstanding SENT challenge. A user
+// may only have one live outgoing challenge at a time — they must cancel
+// it (or have it resolved) before sending another or starting a new game.
+function hasPendingSentChallenge(userId) {
+  if (!userId) return false;
+  return Object.values(challenges).some(
+    (c) => c.challengerUserId === userId,
+  );
+}
+
+// Auto-declines every challenge this user has RECEIVED (they're the
+// target) — e.g. because they just started a different game, or have
+// gone fully offline. Always tells the challenger they were declined; if
+// `notifyTarget` is set, also tells this user's own other tabs to drop it
+// from their notification bell (used when the target is still connected
+// elsewhere, e.g. multiple open tabs). `reason` is passed straight through
+// to the challenger so the client can show an accurate toast — "offline"
+// when the target's browser actually closed, "timeout" for every other
+// auto-decline path (e.g. they started a different game).
+function declineReceivedChallenges(
+  userId,
+  { notifyTarget = false, reason = "timeout" } = {},
+) {
+  if (!userId || !io) return;
+  for (const challengeId of Object.keys(challenges)) {
+    const challenge = challenges[challengeId];
+    if (challenge.targetUserId !== userId) continue;
+    clearChallenge(challengeId);
+
+    const challengerSockets = onlineUsers[challenge.challengerUserId];
+    if (challengerSockets) {
+      challengerSockets.forEach((sid) =>
+        io.to(sid).emit("challenge-declined", {
+          challengeId,
+          targetUsername: challenge.targetUsername || null,
+          auto: true,
+          reason,
+        }),
+      );
+    }
+
+    if (notifyTarget) {
+      const targetSockets = onlineUsers[userId];
+      if (targetSockets) {
+        targetSockets.forEach((sid) =>
+          io.to(sid).emit("challenge-removed", { challengeId }),
+        );
+      }
+    }
+  }
+}
+
+// Withdraws every challenge this user has SENT (they're the challenger) —
+// e.g. because they just started a different game (including by accepting
+// someone else's challenge, which never goes through the "cancel it first"
+// guards on find-match/bot:new-game). Tells the target(s) to silently drop
+// it from wherever it's currently showing (toast or bell) — this is a
+// withdrawal, not a decline, so it's not recorded as one. Also tells the
+// challenger's own other tabs to drop their "waiting for a response"
+// banner, since it was this same user who just started the new game.
+function cancelSentChallenges(userId) {
+  if (!userId || !io) return;
+  for (const challengeId of Object.keys(challenges)) {
+    const challenge = challenges[challengeId];
+    if (challenge.challengerUserId !== userId) continue;
+    clearChallenge(challengeId);
+
+    const targetSockets = onlineUsers[challenge.targetUserId];
+    if (targetSockets) {
+      targetSockets.forEach((sid) =>
+        io.to(sid).emit("challenge-removed", { challengeId }),
+      );
+    }
+
+    const challengerSockets = onlineUsers[userId];
+    if (challengerSockets) {
+      challengerSockets.forEach((sid) =>
+        io.to(sid).emit("challenge-removed", { challengeId }),
+      );
+    }
+  }
+}
+
+// Called the moment a user actually starts a new game — paired via
+// matchmaking, a challenge of theirs was accepted, or they started a bot
+// game: any challenge they'd sent is withdrawn, and any challenge still
+// waiting on their response is auto-declined.
+function resolveChallengesForNewGame(userId) {
+  if (!userId) return;
+  cancelSentChallenges(userId);
+  declineReceivedChallenges(userId, { notifyTarget: true });
 }
 
 // Removes this socket's own queued entry from every pool. Deliberately
@@ -304,6 +388,12 @@ const initializeSocket = (server) => {
     // Guests have no userId and are never presence-tracked.
     markUserInGame(room.whiteUserId, roomId);
     markUserInGame(room.blackUserId, roomId);
+
+    // Both players are now starting a new game: withdraw anything either
+    // of them had sent, and auto-decline anything either of them still
+    // owed a response to.
+    resolveChallengesForNewGame(room.whiteUserId);
+    resolveChallengesForNewGame(room.blackUserId);
 
     io.to(roomId).emit("game-started", {
       room,
@@ -598,6 +688,15 @@ const initializeSocket = (server) => {
       ({ username, rating, timeControl, isRated = true }) => {
         const userId = getUserIdFromSocket(socket);
 
+        // Can't start hunting for a new game while a challenge they sent
+        // is still pending — they need to cancel it first.
+        if (hasPendingSentChallenge(userId)) {
+          return socket.emit("challenge-error", {
+            message:
+              "You have a challenge pending. Cancel it before starting a new game.",
+          });
+        }
+
         // Same account already searching from another browser/tab? Don't
         // start a second search — tell this tab so it can show a message.
         const existingSearch = findActiveSearchForUser(userId);
@@ -652,7 +751,14 @@ const initializeSocket = (server) => {
     // ── Direct challenges (Challenge button -> ChallengeModal) ───────────────
     socket.on(
       "send-challenge",
-      ({ targetUserId, username, rating, timeControl, isRated = true }) => {
+      ({
+        targetUserId,
+        targetUsername,
+        username,
+        rating,
+        timeControl,
+        isRated = true,
+      }) => {
         const challengerUserId = getUserIdFromSocket(socket);
 
         if (!challengerUserId) {
@@ -672,6 +778,15 @@ const initializeSocket = (server) => {
         ) {
           return socket.emit("challenge-error", {
             message: "Invalid time control.",
+          });
+        }
+
+        // Only one outstanding sent challenge at a time — and it blocks
+        // starting a new game elsewhere too (see find-match/bot:new-game).
+        if (hasPendingSentChallenge(challengerUserId)) {
+          return socket.emit("challenge-error", {
+            message:
+              "You already have a challenge pending. Cancel it before sending another.",
           });
         }
 
@@ -697,21 +812,45 @@ const initializeSocket = (server) => {
           challengerUsername: username || "Player",
           challengerRating,
           targetUserId,
+          targetUsername: targetUsername || null,
           timeControl: {
             base: timeControl.base,
             increment: timeControl.increment,
           },
           isRated: Boolean(isRated),
           gameType,
-          timeoutId: null,
+          toastTimeoutId: null,
+          expireTimeoutId: null,
         };
 
-        challenge.timeoutId = setTimeout(() => {
+        // Phase 1 -> Phase 2: toast window elapses with no response — tell
+        // the target to keep it as a still-pending entry in their
+        // notification bell instead of dismissing it.
+        challenge.toastTimeoutId = setTimeout(() => {
+          const stillOnline = onlineUsers[targetUserId];
+          if (stillOnline) {
+            stillOnline.forEach((sid) =>
+              io.to(sid).emit("challenge-toast-expired", { challengeId }),
+            );
+          }
+        }, CHALLENGE_TOAST_MS);
+
+        // Phase 2 ends: nobody responded within the full window at all —
+        // auto-decline for good.
+        challenge.expireTimeoutId = setTimeout(() => {
           clearChallenge(challengeId);
-          io.to(socket.id).emit("challenge-expired", { challengeId });
-          targetSockets.forEach((sid) =>
-            io.to(sid).emit("challenge-expired", { challengeId }),
-          );
+          const stillOnline = onlineUsers[targetUserId];
+          if (stillOnline) {
+            stillOnline.forEach((sid) =>
+              io.to(sid).emit("challenge-expired", { challengeId }),
+            );
+          }
+          io.to(socket.id).emit("challenge-declined", {
+            challengeId,
+            targetUsername: challenge.targetUsername,
+            auto: true,
+            reason: "timeout",
+          });
         }, CHALLENGE_TTL_MS);
 
         challenges[challengeId] = challenge;
@@ -730,9 +869,45 @@ const initializeSocket = (server) => {
           });
         });
 
-        socket.emit("challenge-sent", { challengeId, targetUserId });
+        socket.emit("challenge-sent", {
+          challengeId,
+          targetUserId,
+          targetUsername: challenge.targetUsername,
+          isRated: challenge.isRated,
+          timeControl: challenge.timeControl,
+          gameType,
+          sentAt: Date.now(),
+        });
       },
     );
+
+    // Challenger backs out of their own still-pending sent challenge.
+    socket.on("cancel-challenge", ({ challengeId } = {}) => {
+      const challenge = challenges[challengeId];
+      if (!challenge) {
+        return socket.emit("challenge-error", {
+          message: "This challenge is no longer available.",
+        });
+      }
+
+      const userId = getUserIdFromSocket(socket);
+      if (!userId || userId !== challenge.challengerUserId) {
+        return socket.emit("challenge-error", {
+          message: "You can't cancel a challenge you didn't send.",
+        });
+      }
+
+      clearChallenge(challengeId);
+
+      const targetSockets = onlineUsers[challenge.targetUserId];
+      if (targetSockets) {
+        targetSockets.forEach((sid) =>
+          io.to(sid).emit("challenge-removed", { challengeId }),
+        );
+      }
+
+      socket.emit("challenge-cancelled", { challengeId });
+    });
 
     socket.on(
       "respond-challenge",
@@ -754,10 +929,20 @@ const initializeSocket = (server) => {
         clearChallenge(challengeId);
 
         if (!accepted) {
-          io.to(challenge.challengerSocketId).emit("challenge-declined", {
-            challengeId,
-            targetUsername: username,
-          });
+          const challengerSockets = onlineUsers[challenge.challengerUserId];
+          if (challengerSockets && challengerSockets.size > 0) {
+            challengerSockets.forEach((sid) =>
+              io.to(sid).emit("challenge-declined", {
+                challengeId,
+                targetUsername: username,
+              }),
+            );
+          } else {
+            io.to(challenge.challengerSocketId).emit("challenge-declined", {
+              challengeId,
+              targetUsername: username,
+            });
+          }
           return;
         }
 
@@ -1051,6 +1236,16 @@ const initializeSocket = (server) => {
       const userId = getUserIdFromSocket(socket);
       if (!userId) return;
 
+      // Can't start a new game while a challenge they sent is still
+      // pending — they need to cancel it first.
+      if (hasPendingSentChallenge(userId)) {
+        return socket.emit("challenge-error", {
+          message:
+            "You have a challenge pending. Cancel it before starting a new game.",
+        });
+      }
+      resolveChallengesForNewGame(userId);
+
       const roomName = getBotRoomName(userId);
       socket.join(roomName);
 
@@ -1299,8 +1494,9 @@ const initializeSocket = (server) => {
       // Drop this socket from the matchmaking queue if it was waiting.
       removeFromMatchmakingQueues(socket.id);
 
-      // Cancel any challenge this socket sent — the target(s) should stop
-      // seeing a notification for a challenger who's no longer around.
+      // Withdraw any challenge this socket sent — the target(s) should
+      // stop seeing a notification for a challenger who's no longer
+      // around. This is a silent withdrawal (not a decline).
       for (const challengeId in challenges) {
         const challenge = challenges[challengeId];
         if (challenge.challengerSocketId !== socket.id) continue;
@@ -1308,7 +1504,7 @@ const initializeSocket = (server) => {
         const targetSockets = onlineUsers[challenge.targetUserId];
         if (targetSockets) {
           targetSockets.forEach((sid) =>
-            io.to(sid).emit("challenge-expired", { challengeId }),
+            io.to(sid).emit("challenge-removed", { challengeId }),
           );
         }
       }
@@ -1343,6 +1539,13 @@ const initializeSocket = (server) => {
             delete onlineUsers[disconnectedUserId];
           }
           broadcastPresence(disconnectedUserId);
+        }
+
+        // If that was this user's last open tab (browser fully closed),
+        // any challenge still waiting on their response gets auto-declined
+        // — the challenger shouldn't be left hanging on someone who's gone.
+        if (!onlineUsers[disconnectedUserId]) {
+          declineReceivedChallenges(disconnectedUserId, { reason: "offline" });
         }
       }
 

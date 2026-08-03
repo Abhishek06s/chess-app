@@ -396,6 +396,7 @@ const Profile = () => {
   const handleConfirmChallenge = ({ targetUser, rated, timeControl }) => {
     socket.emit("send-challenge", {
       targetUserId: targetUser._id,
+      targetUsername: targetUser.username,
       username: authUser?.username,
       rating: authUser?.stats,
       timeControl,

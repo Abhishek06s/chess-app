@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Bell, Check, X, Swords, UserPlus, Trash2 } from "lucide-react";
-import { useNotifications } from "../context/notificationContext";
+import { useNotifications, CHALLENGE_BELL_MS } from "../context/notificationContext";
 import { capitalize, formatTimeControlLabel } from "./Challenge";
 
 const timeAgo = (ts) => {
@@ -86,9 +86,85 @@ const ChallengeHistoryRow = ({ notification }) => (
   </div>
 );
 
+// A challenge that outlived its floating toast but is STILL awaiting a
+// response — it stays actionable here for the rest of the grace period
+// before auto-declining on its own.
+const PendingChallengeRow = ({ notification, onRespond }) => {
+  const { challengeId, movedToBellAt, responding } = notification;
+
+  const [remaining, setRemaining] = useState(
+    Math.max(
+      0,
+      Math.ceil((CHALLENGE_BELL_MS - (Date.now() - movedToBellAt)) / 1000),
+    ),
+  );
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRemaining(
+        Math.max(
+          0,
+          Math.ceil((CHALLENGE_BELL_MS - (Date.now() - movedToBellAt)) / 1000),
+        ),
+      );
+    }, 250);
+    return () => clearInterval(interval);
+  }, [movedToBellAt]);
+
+  return (
+    <div className="flex items-center gap-3 p-3 border-b border-zinc-800 last:border-b-0">
+      <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl shrink-0">
+        <Swords className="w-4 h-4 text-indigo-400" />
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-zinc-100 truncate">
+          {notification.challenger?.username}
+        </p>
+        <p className="text-xs text-zinc-500 truncate">
+          {formatTimeControlLabel(
+            notification.timeControl?.base,
+            notification.timeControl?.increment,
+          )}{" "}
+          · {capitalize(notification.gameType)} ·{" "}
+          {notification.isRated ? "Rated" : "Unrated"}
+        </p>
+      </div>
+
+      <div className="flex items-center gap-2 shrink-0">
+        <span className="text-[11px] font-mono text-zinc-500 w-4 text-center">
+          {remaining}
+        </span>
+        <button
+          onClick={() => onRespond(challengeId, true)}
+          disabled={responding}
+          title="Accept"
+          className="p-1.5 rounded-lg bg-emerald-600/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-600 hover:text-white transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Check className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => onRespond(challengeId, false)}
+          disabled={responding}
+          title="Decline"
+          className="p-1.5 rounded-lg bg-red-600/10 border border-red-500/30 text-red-400 hover:bg-red-600 hover:text-white transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const NotificationBell = () => {
-  const { notifications, unreadCount, acceptFriend, rejectFriend, clearAll } =
-    useNotifications();
+  const {
+    notifications,
+    unreadCount,
+    acceptFriend,
+    rejectFriend,
+    respondChallenge,
+    clearAll,
+  } = useNotifications();
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
 
@@ -154,18 +230,28 @@ const NotificationBell = () => {
                 </p>
               </div>
             ) : (
-              notifications.map((n) =>
-                n.type === "friend_request" ? (
-                  <FriendRequestRow
-                    key={n.id}
-                    notification={n}
-                    onAccept={acceptFriend}
-                    onReject={rejectFriend}
-                  />
-                ) : (
-                  <ChallengeHistoryRow key={n.id} notification={n} />
-                ),
-              )
+              notifications.map((n) => {
+                if (n.type === "friend_request") {
+                  return (
+                    <FriendRequestRow
+                      key={n.id}
+                      notification={n}
+                      onAccept={acceptFriend}
+                      onReject={rejectFriend}
+                    />
+                  );
+                }
+                if (n.type === "challenge" && n.status === "pending") {
+                  return (
+                    <PendingChallengeRow
+                      key={n.id}
+                      notification={n}
+                      onRespond={respondChallenge}
+                    />
+                  );
+                }
+                return <ChallengeHistoryRow key={n.id} notification={n} />;
+              })
             )}
           </div>
         </div>

@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { X, Zap, Timer, Gauge, Sliders, Grid3X3Icon, Plus, Check, Swords } from "lucide-react";
+import { X, Zap, Timer, Gauge, Sliders, Grid3X3Icon, Plus, Check, Swords, Hourglass } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { TIME_PRESETS } from "../utils/timeControls";
 import { BulletIcon } from "./GameSidebar";
-import { useNotifications } from "../context/notificationContext";
+import {
+  useNotifications,
+  CHALLENGE_TOAST_MS,
+  CHALLENGE_TTL_MS as CHALLENGE_SENT_TTL_MS,
+} from "../context/notificationContext";
 
 const MODES = ["bullet", "blitz", "rapid", "custom"];
 
@@ -370,8 +374,6 @@ export const ChallengeModal = ({ isOpen, onClose, targetUser, onConfirm }) => {
 // State is owned by NotificationContext (shared with the notification
 // bell in the Navbar) — this component just renders the floating toasts.
 
-export const CHALLENGE_TTL_MS = 15000;
-
 export const capitalize = (s = "") => s.charAt(0).toUpperCase() + s.slice(1);
 
 export const formatTimeControlLabel = (base, increment) => {
@@ -380,12 +382,22 @@ export const formatTimeControlLabel = (base, increment) => {
 };
 
 export const ChallengeNotificationCenter = () => {
-  const { activeChallenges, respondChallenge } = useNotifications();
+  const { activeChallenges, respondChallenge, sentChallenge, cancelChallenge } =
+    useNotifications();
 
-  if (!activeChallenges || activeChallenges.length === 0) return null;
+  const hasReceived = activeChallenges && activeChallenges.length > 0;
+  const hasSent = Boolean(sentChallenge);
+
+  if (!hasReceived && !hasSent) return null;
 
   return (
     <div className="fixed top-4 inset-x-0 z-100 flex flex-col items-center gap-3 px-4 pointer-events-none">
+      {hasSent && (
+        <SentChallengeBanner
+          challenge={sentChallenge}
+          onCancel={cancelChallenge}
+        />
+      )}
       {activeChallenges.map((challenge) => (
         <ChallengeToast
           key={challenge.challengeId}
@@ -397,12 +409,80 @@ export const ChallengeNotificationCenter = () => {
   );
 };
 
+// Shown to the CHALLENGER for as long as their own sent challenge is
+// outstanding (toast phase + bell grace period on the receiving end, ~60s
+// total), with a live countdown and a way to withdraw it early.
+const SentChallengeBanner = ({ challenge, onCancel }) => {
+  const { challengeId, targetUsername, isRated, timeControl, gameType, sentAt } =
+    challenge;
+
+  const [remaining, setRemaining] = useState(
+    Math.max(
+      0,
+      Math.ceil((CHALLENGE_SENT_TTL_MS - (Date.now() - sentAt)) / 1000),
+    ),
+  );
+  const [cancelling, setCancelling] = useState(false);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRemaining(
+        Math.max(
+          0,
+          Math.ceil((CHALLENGE_SENT_TTL_MS - (Date.now() - sentAt)) / 1000),
+        ),
+      );
+    }, 250);
+    return () => clearInterval(interval);
+  }, [sentAt]);
+
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  const clockLabel = `${minutes}:${String(seconds).padStart(2, "0")}`;
+
+  return (
+    <div className="pointer-events-auto w-full max-w-md bg-zinc-900 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/50 p-4 flex items-center gap-3 animate-in slide-in-from-top-4 fade-in duration-200">
+      <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl shrink-0">
+        <Hourglass className="w-5 h-5 text-amber-400" />
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-bold text-zinc-100 truncate">
+          Waiting for {targetUsername || "opponent"} to respond
+        </p>
+        <p className="text-xs text-zinc-400 mt-0.5 truncate">
+          {isRated ? "Rated" : "Unrated"} ·{" "}
+          {formatTimeControlLabel(timeControl.base, timeControl.increment)} (
+          {capitalize(gameType)})
+        </p>
+      </div>
+
+      <div className="flex items-center gap-2 shrink-0">
+        <span className="text-[11px] font-mono text-zinc-500 w-9 text-center">
+          {clockLabel}
+        </span>
+        <button
+          onClick={() => {
+            setCancelling(true);
+            onCancel(challengeId);
+          }}
+          disabled={cancelling}
+          title="Cancel challenge"
+          className="p-2 rounded-lg bg-red-600/10 border border-red-500/30 text-red-400 hover:bg-red-600 hover:text-white transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const ChallengeToast = ({ challenge, onRespond }) => {
   const { challenger, isRated, timeControl, gameType, receivedAt, responding } =
     challenge;
 
   const [remaining, setRemaining] = useState(
-    Math.max(0, Math.ceil((CHALLENGE_TTL_MS - (Date.now() - receivedAt)) / 1000)),
+    Math.max(0, Math.ceil((CHALLENGE_TOAST_MS - (Date.now() - receivedAt)) / 1000)),
   );
 
   useEffect(() => {
@@ -410,7 +490,7 @@ const ChallengeToast = ({ challenge, onRespond }) => {
       setRemaining(
         Math.max(
           0,
-          Math.ceil((CHALLENGE_TTL_MS - (Date.now() - receivedAt)) / 1000),
+          Math.ceil((CHALLENGE_TOAST_MS - (Date.now() - receivedAt)) / 1000),
         ),
       );
     }, 250);
