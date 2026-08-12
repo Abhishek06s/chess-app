@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Bell, Check, X, Swords, UserPlus, Trash2 } from "lucide-react";
+import { Bell, Check, X, Trash2 } from "lucide-react";
 import { useNotifications, CHALLENGE_BELL_MS } from "../context/notificationContext";
 import { capitalize, formatTimeControlLabel } from "./Challenge";
+import Avatar from "./Avatar";
 
 const timeAgo = (ts) => {
   const diff = Math.max(0, Date.now() - ts);
@@ -25,9 +26,7 @@ const FriendRequestRow = ({ notification, onAccept, onReject }) => {
 
   return (
     <div className="flex items-center gap-3 p-3 border-b border-zinc-800 last:border-b-0">
-      <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl shrink-0">
-        <UserPlus className="w-4 h-4 text-emerald-400" />
-      </div>
+      <Avatar src={notification.avatar} username={notification.username} size="sm" />
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-zinc-100 truncate">
@@ -62,9 +61,11 @@ const FriendRequestRow = ({ notification, onAccept, onReject }) => {
 
 const ChallengeHistoryRow = ({ notification }) => (
   <div className="flex items-center gap-3 p-3 border-b border-zinc-800 last:border-b-0 opacity-80">
-    <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl shrink-0">
-      <Swords className="w-4 h-4 text-indigo-400" />
-    </div>
+    <Avatar
+      src={notification.challenger?.avatar}
+      username={notification.challenger?.username}
+      size="sm"
+    />
 
     <div className="flex-1 min-w-0">
       <p className="text-sm font-semibold text-zinc-100 truncate">
@@ -113,9 +114,11 @@ const PendingChallengeRow = ({ notification, onRespond }) => {
 
   return (
     <div className="flex items-center gap-3 p-3 border-b border-zinc-800 last:border-b-0">
-      <div className="p-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl shrink-0">
-        <Swords className="w-4 h-4 text-indigo-400" />
-      </div>
+      <Avatar
+        src={notification.challenger?.avatar}
+        username={notification.challenger?.username}
+        size="sm"
+      />
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-semibold text-zinc-100 truncate">

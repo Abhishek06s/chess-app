@@ -82,15 +82,51 @@ npm install
 
 ## 🔧 Environment Variables
 
-Create a `.env` file in `Backend/`:
+Create a `.env` file in `Backend/` (see `.env.example`):
 
 ```env
 PORT=5000
 MONGO_URI=<your-mongodb-connection-string>
 JWT_SECRET=<your-jwt-secret>
+
+# Avatar image hosting (Cloudinary) — see "Avatar image hosting" below
+CLOUDINARY_CLOUD_NAME=<your-cloud-name>
+CLOUDINARY_API_KEY=<your-api-key>
+CLOUDINARY_API_SECRET=<your-api-secret>
 ```
 
 > `server.js` overrides the system DNS resolvers (`1.1.1.1`, `8.8.8.8`) before connecting — useful in environments where the default DNS can't resolve your MongoDB Atlas hostname.
+
+### 🖼️ Avatar image hosting
+
+User-uploaded avatars are stored on **Cloudinary** rather than on the
+server's own disk (a normal Node host's filesystem isn't reliably
+persistent/shared across instances, so files saved there can vanish on
+redeploy). The backend never sees your Cloudinary password — it only ever
+uses the API key/secret below to talk to the Cloudinary API directly.
+
+**How to get the three credentials above:**
+
+1. Go to https://cloudinary.com/users/register/free and create a free
+   account (email + password, or "Sign up with Google/GitHub"). No credit
+   card is required for the free tier.
+2. After verifying your email, you'll land on the **Cloudinary Console**
+   (`https://console.cloudinary.com`).
+3. On the Console's main dashboard page, there's a "Product Environment
+   Credentials" / "API Keys" panel showing:
+   - **Cloud name** → `CLOUDINARY_CLOUD_NAME`
+   - **API Key** → `CLOUDINARY_API_KEY`
+   - **API Secret** → `CLOUDINARY_API_SECRET` (click "Reveal" to see it)
+4. Copy those three values into `Backend/.env` as shown above.
+5. That's it — no further setup is required. Uploaded avatars will appear
+   in the Console under **Assets → Media Library → chess-app/avatars**.
+
+The free tier's storage/bandwidth limits are generous enough for avatar
+thumbnails; check Cloudinary's current pricing page if you expect heavy
+traffic. If you'd rather use a different provider (S3, Supabase Storage,
+etc.), swap out `src/config/cloudinary.config.js` and the upload call in
+`uploadAvatarImage` (`src/controllers/user.controller.js`) — the rest of
+the app only depends on `user.avatar` being a public image URL.
 
 ---
 
@@ -150,12 +186,21 @@ All protected routes expect a JWT, either as an HTTP-only `token` cookie (set au
 | GET | `/profile` | Required | Get the current user's own profile |
 | GET | `/profile/:username` | Public | Get any user's public profile |
 | GET | `/leaderboard` | Public | Ranked list of players |
+| GET | `/search?q=` | Required | Search users by username prefix |
+| POST | `/avatar` | Required | Upload/replace your avatar (`multipart/form-data`, field `avatar`) |
+| DELETE | `/avatar` | Required | Remove your avatar (reverts to the default pawn) |
+| GET | `/avatars?usernames=a,b` | Public | Batch-resolve avatars for a list of usernames |
+| GET | `/friends/requests` | Required | List pending (received) friend requests |
+| POST | `/friends/request/:userId` | Required | Send a friend request |
+| POST | `/friends/accept/:userId` | Required | Accept a friend request |
+| POST | `/friends/reject/:userId` | Required | Reject a friend request |
+| DELETE | `/friends/:userId` | Required | Remove a friend |
 
 ---
 
 ## 🗄️ Data Models
 
-**`User`** — `username`, `email`, hashed `password`, and a `stats` object with independent `bullet` / `blitz` / `rapid` entries, each tracking `rating` (default `800`), `rd` (rating deviation, default `350`), `gamesPlayed`, `wins`, `losses`, `draws`.
+**`User`** — `username`, `email`, hashed `password`, `avatar` (Cloudinary image URL, `null` until the user uploads one — the frontend shows a default pawn avatar in that case), `avatarPublicId` (internal, used to replace/delete the Cloudinary asset), and a `stats` object with independent `bullet` / `blitz` / `rapid` entries, each tracking `rating` (default `800`), `rd` (rating deviation, default `350`), `gamesPlayed`, `wins`, `losses`, `draws`.
 
 **`Game`** — a completed game record: PGN/FEN snapshot, move list, `result`, detected `opening` (name + ECO code), `timeControl`, `gameType`, per-side time remaining, `opponentType` (`bot`/`human`) with related fields, `rated` flag, and `termination` reason (checkmate, timeout, resignation, etc.). Human games are linked to `whitePlayer`/`blackPlayer` (and `player1`/`player2`) via `User` refs; a `roomId` uniquely ties a record back to its live multiplayer session.
 

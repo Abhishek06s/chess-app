@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { X, Zap, Timer, Gauge, Sliders, Grid3X3Icon, Plus, Check, Swords, Hourglass } from "lucide-react";
+import { X, Zap, Timer, Gauge, Sliders, Grid3X3Icon, Plus, Check } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { TIME_PRESETS } from "../utils/timeControls";
 import { BulletIcon } from "./GameSidebar";
+import Avatar from "./Avatar";
 import {
   useNotifications,
   CHALLENGE_TOAST_MS,
@@ -165,9 +166,11 @@ export const ChallengeModal = ({ isOpen, onClose, targetUser, onConfirm }) => {
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-zinc-800">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl shrink-0">
-              <ChessboardWithPlus className="w-5 h-5 text-indigo-400" />
-            </div>
+            <Avatar
+              src={targetUser.avatar}
+              username={targetUser.username}
+              size="md"
+            />
             <div className="min-w-0">
               <h2 className="text-lg font-bold text-zinc-100 truncate">
                 Challenge {targetUser.username}
@@ -413,8 +416,15 @@ export const ChallengeNotificationCenter = () => {
 // outstanding (toast phase + bell grace period on the receiving end, ~60s
 // total), with a live countdown and a way to withdraw it early.
 const SentChallengeBanner = ({ challenge, onCancel }) => {
-  const { challengeId, targetUsername, isRated, timeControl, gameType, sentAt } =
-    challenge;
+  const {
+    challengeId,
+    targetUsername,
+    targetAvatar,
+    isRated,
+    timeControl,
+    gameType,
+    sentAt,
+  } = challenge;
 
   const [remaining, setRemaining] = useState(
     Math.max(
@@ -442,9 +452,7 @@ const SentChallengeBanner = ({ challenge, onCancel }) => {
 
   return (
     <div className="pointer-events-auto w-full max-w-md bg-zinc-900 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/50 p-4 flex items-center gap-3 animate-in slide-in-from-top-4 fade-in duration-200">
-      <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl shrink-0">
-        <Hourglass className="w-5 h-5 text-amber-400" />
-      </div>
+      <Avatar src={targetAvatar} username={targetUsername} size="md" />
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-bold text-zinc-100 truncate">
@@ -499,9 +507,7 @@ const ChallengeToast = ({ challenge, onRespond }) => {
 
   return (
     <div className="pointer-events-auto w-full max-w-md bg-zinc-900 border border-indigo-500/40 rounded-2xl shadow-2xl shadow-black/50 p-4 flex items-center gap-3 animate-in slide-in-from-top-4 fade-in duration-200">
-      <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl shrink-0">
-        <Swords className="w-5 h-5 text-indigo-400" />
-      </div>
+      <Avatar src={challenger.avatar} username={challenger.username} size="md" />
 
       <div className="flex-1 min-w-0">
         <p className="text-sm font-bold text-zinc-100 truncate">

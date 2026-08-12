@@ -53,3 +53,32 @@ export const removeFriend = async (userId) => {
 
   return response.data;
 };
+
+export const uploadAvatar = async (file) => {
+  const formData = new FormData();
+  formData.append("avatar", file);
+
+  const response = await api.post("/users/avatar", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+
+  return response.data;
+};
+
+export const removeAvatar = async () => {
+  const response = await api.delete("/users/avatar");
+
+  return response.data;
+};
+
+
+export const getAvatarsByUsernames = async (usernames = []) => {
+  const unique = [...new Set(usernames.filter(Boolean))];
+  if (unique.length === 0) return {};
+
+  const response = await api.get(
+    `/users/avatars?usernames=${encodeURIComponent(unique.join(","))}`,
+  );
+
+  return response.data.avatars || {};
+};

@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
+const multer = require("multer");
 
 const authRoutes = require("./routes/auth.routes");
 const gameRoutes = require("./routes/game.routes");
@@ -29,6 +30,26 @@ app.get("/", (req, res) => {
     success: true,
     message: "Chess Backend API Running",
   });
+});
+
+
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    const message =
+      err.code === "LIMIT_FILE_SIZE"
+        ? "Image must be 5MB or smaller"
+        : err.message;
+    return res.status(400).json({ success: false, message });
+  }
+
+  if (err) {
+    return res.status(err.status || 500).json({
+      success: false,
+      message: err.message || "Something went wrong",
+    });
+  }
+
+  next();
 });
 
 module.exports = app;

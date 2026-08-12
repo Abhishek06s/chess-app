@@ -356,6 +356,8 @@ const initializeSocket = (server) => {
       blackUserId: black.userId,
       whiteName: white.username,
       blackName: black.username,
+      whiteAvatar: white.avatar || null,
+      blackAvatar: black.avatar || null,
       gameType: white.gameType,
       timeControl: {
         base: white.timeControl.base,
@@ -404,6 +406,8 @@ const initializeSocket = (server) => {
       blackUserId: room.blackUserId,
       whiteName: room.whiteName,
       blackName: room.blackName,
+      whiteAvatar: room.whiteAvatar,
+      blackAvatar: room.blackAvatar,
       whiteRating: room.whiteRating,
       blackRating: room.blackRating,
       gameType: room.gameType,
@@ -499,6 +503,8 @@ const initializeSocket = (server) => {
     activeColor: room.activeColor,
     whiteName: room.whiteName,
     blackName: room.blackName,
+    whiteAvatar: room.whiteAvatar,
+    blackAvatar: room.blackAvatar,
     whiteRating: room.whiteRating,
     blackRating: room.blackRating,
     whitePlayerId: room.whiteUserId,
@@ -698,7 +704,7 @@ const initializeSocket = (server) => {
     // alphanumeric id instead of a 6-character shareable code.
     socket.on(
       "find-match",
-      ({ username, rating, timeControl, isRated = true }) => {
+      ({ username, avatar, rating, timeControl, isRated = true }) => {
         const userId = getUserIdFromSocket(socket);
 
         // Can't start hunting for a new game while a challenge they sent
@@ -735,6 +741,7 @@ const initializeSocket = (server) => {
           socketId: socket.id,
           userId,
           username,
+          avatar: avatar || null,
           rating: playerRating,
           rd: playerRD,
           timeControl: {
@@ -767,7 +774,9 @@ const initializeSocket = (server) => {
       ({
         targetUserId,
         targetUsername,
+        targetAvatar,
         username,
+        avatar,
         rating,
         timeControl,
         isRated = true,
@@ -823,9 +832,11 @@ const initializeSocket = (server) => {
           challengerSocketId: socket.id,
           challengerUserId,
           challengerUsername: username || "Player",
+          challengerAvatar: avatar || null,
           challengerRating,
           targetUserId,
           targetUsername: targetUsername || null,
+          targetAvatar: targetAvatar || null,
           timeControl: {
             base: timeControl.base,
             increment: timeControl.increment,
@@ -874,6 +885,7 @@ const initializeSocket = (server) => {
             challenger: {
               userId: challengerUserId,
               username: challenge.challengerUsername,
+              avatar: challenge.challengerAvatar,
               rating: challengerRating,
             },
             isRated: challenge.isRated,
@@ -886,6 +898,7 @@ const initializeSocket = (server) => {
           challengeId,
           targetUserId,
           targetUsername: challenge.targetUsername,
+          targetAvatar: challenge.targetAvatar,
           isRated: challenge.isRated,
           timeControl: challenge.timeControl,
           gameType,
@@ -924,7 +937,7 @@ const initializeSocket = (server) => {
 
     socket.on(
       "respond-challenge",
-      ({ challengeId, accepted, username, rating }) => {
+      ({ challengeId, accepted, username, avatar, rating }) => {
         const challenge = challenges[challengeId];
         if (!challenge) {
           return socket.emit("challenge-error", {
@@ -974,6 +987,7 @@ const initializeSocket = (server) => {
           socketId: challenge.challengerSocketId,
           userId: challenge.challengerUserId,
           username: challenge.challengerUsername,
+          avatar: challenge.challengerAvatar,
           rating: challenge.challengerRating,
           timeControl: challenge.timeControl,
           isRated: challenge.isRated,
@@ -983,6 +997,7 @@ const initializeSocket = (server) => {
           socketId: socket.id,
           userId: responderUserId,
           username: username || "Player",
+          avatar: avatar || null,
           rating: responderRating,
           timeControl: challenge.timeControl,
           isRated: challenge.isRated,

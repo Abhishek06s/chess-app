@@ -4,6 +4,7 @@ import { Trophy, Medal, ChevronDown } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import usePresence from "../hooks/usePresence";
 import StatusIndicator from "../components/StatusIndicator";
+import Avatar from "../components/Avatar";
 import {ChallengeButton , ChallengeModal} from "../components/Challenge";
 import { useAuth } from "../context/authContext";
 import { socket } from "../services/socket.service";
@@ -46,7 +47,9 @@ const Leaderboard = () => {
     socket.emit("send-challenge", {
       targetUserId: targetUser._id,
       targetUsername: targetUser.username,
+      targetAvatar: targetUser.avatar || null,
       username: authUser?.username,
+      avatar: authUser?.avatar || null,
       rating: authUser?.stats,
       timeControl,
       isRated: rated,
@@ -169,6 +172,11 @@ const Leaderboard = () => {
                     {/* Player Name */}
                     <td className="p-5 font-medium text-zinc-100 group-hover:text-emerald-400 transition-colors">
                       <div className="flex items-center gap-3">
+                        <Avatar
+                          src={player.avatar}
+                          username={player.username}
+                          size="sm"
+                        />
                         <NavLink
                           to={`/profile/${player.username}`}
                           className="hover:text-indigo-400 transition-colors"

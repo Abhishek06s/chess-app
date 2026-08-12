@@ -10,13 +10,28 @@ const {
   acceptFriendRequest,
   rejectFriendRequest,
   removeFriend,
+  uploadAvatarImage,
+  removeAvatarImage,
+  getAvatarsByUsernames,
 } = require("../controllers/user.controller");
 
 const authMiddleware = require("../middlewares/auth.middleware");
+const { uploadAvatar } = require("../middlewares/upload.middleware");
 
 const router = express.Router();
 
 router.get("/profile", authMiddleware.authMiddleware, getProfile);
+
+router.post(
+  "/avatar",
+  authMiddleware.authMiddleware,
+  uploadAvatar.single("avatar"),
+  uploadAvatarImage,
+);
+
+router.delete("/avatar", authMiddleware.authMiddleware, removeAvatarImage);
+
+router.get("/avatars", getAvatarsByUsernames);
 
 router.get("/search", authMiddleware.authMiddleware, searchUsers);
 

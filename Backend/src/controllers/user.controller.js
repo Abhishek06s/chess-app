@@ -1,5 +1,10 @@
 const User = require("../models/user.model");
 const { emitToUser } = require("../../socket/socket");
+const cloudinary = require("../config/cloudinary.config");
+
+// Fields every user-facing list/lookup should carry so the frontend can
+// render an avatar (or fall back to the default pawn) without extra calls.
+const PUBLIC_USER_FIELDS = "username stats avatar";
 
 /**
  * Get Profile
@@ -9,9 +14,9 @@ const getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
       .select("-password")
-      .populate("friends", "username stats")
-      .populate("friendRequests.received", "username stats")
-      .populate("friendRequests.sent", "username stats");
+      .populate("friends", PUBLIC_USER_FIELDS)
+      .populate("friendRequests.received", PUBLIC_USER_FIELDS)
+      .populate("friendRequests.sent", PUBLIC_USER_FIELDS);
 
     res.status(200).json({
       success: true,
@@ -83,7 +88,7 @@ const getUserByUsername = async (req, res) => {
       username: req.params.username,
     })
       .select("-password")
-      .populate("friends", "username stats");
+      .populate("friends", PUBLIC_USER_FIELDS);
 
     if (!user) {
       return res.status(404).json({
@@ -126,7 +131,7 @@ const searchUsers = async (req, res) => {
       username: { $regex: `^${query}`, $options: "i" },
       _id: { $ne: req.user._id },
     })
-      .select("username stats friends friendRequests")
+      .select("username stats avatar friends friendRequests")
       .limit(10);
 
     const currentUserId = req.user._id.toString();
@@ -145,6 +150,7 @@ const searchUsers = async (req, res) => {
       return {
         _id: user._id,
         username: user.username,
+        avatar: user.avatar || null,
         rating: user.stats?.rapid?.rating,
         stats: user.stats,
         isFriend,
@@ -173,7 +179,7 @@ const getPendingRequests = async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
       .select("friendRequests")
-      .populate("friendRequests.received", "username stats");
+      .populate("friendRequests.received", PUBLIC_USER_FIELDS);
 
     res.status(200).json({
       success: true,
@@ -258,6 +264,7 @@ const sendFriendRequest = async (req, res) => {
       from: {
         _id: currentUser._id,
         username: currentUser.username,
+        avatar: currentUser.avatar || null,
         stats: currentUser.stats,
       },
     });
@@ -325,13 +332,22 @@ const acceptFriendRequest = async (req, res) => {
     // Let the original sender know (in real time) that their request was
     // accepted, in case they're currently online.
     emitToUser(userId, "friend-request-accepted", {
-      by: { _id: currentUser._id, username: currentUser.username },
+      by: {
+        _id: currentUser._id,
+        username: currentUser.username,
+        avatar: currentUser.avatar || null,
+      },
     });
 
     res.status(200).json({
       success: true,
       message: "Friend request accepted",
-      friend: { _id: senderUser._id, username: senderUser.username },
+      friend: {
+        _id: senderUser._id,
+        username: senderUser.username,
+        avatar: senderUser.avatar || null,
+        stats: senderUser.stats,
+      },
       pendingCount: currentUser.friendRequests.received.length,
     });
   } catch (error) {
@@ -441,6 +457,153 @@ const removeFriend = async (req, res) => {
   }
 };
 
+/**
+ * Upload / replace the logged-in user's avatar
+ */
+
+const uploadAvatarImage = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No image file was provided",
+      });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Re-uses the same public_id (namespaced under the user's id) every
+    // time, so a re-upload simply overwrites the previous asset in
+    // Cloudinary instead of leaking orphaned images.
+    const publicId = `chess-app/avatars/${user._id}`;
+
+    const uploadResult = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          public_id: publicId,
+          overwrite: true,
+          resource_type: "image",
+          folder: undefined,
+          transformation: [
+            { width: 512, height: 512, crop: "fill", gravity: "face" },
+          ],
+        },
+        (error, result) => {
+          if (error) return reject(error);
+          resolve(result);
+        },
+      );
+      uploadStream.end(req.file.buffer);
+    });
+
+    user.avatar = uploadResult.secure_url;
+    user.avatarPublicId = uploadResult.public_id;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      avatar: user.avatar,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message || "Failed to upload avatar",
+    });
+  }
+};
+
+/**
+ * Remove the logged-in user's avatar (reverts to the default pawn avatar)
+ */
+
+const removeAvatarImage = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (user.avatarPublicId) {
+      try {
+        await cloudinary.uploader.destroy(user.avatarPublicId);
+      } catch (destroyError) {
+        // Not fatal — worst case an orphaned asset is left in Cloudinary.
+        console.error("Cloudinary destroy failed:", destroyError.message);
+      }
+    }
+
+    user.avatar = null;
+    user.avatarPublicId = null;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Avatar removed",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * Batch-resolve avatars for a list of usernames.
+
+ * Query Params:
+ * ?usernames=magnus_carlsen,hikaru_nakamura
+ */
+
+const getAvatarsByUsernames = async (req, res) => {
+  try {
+    const raw = (req.query.usernames || "").toString();
+    const usernames = [
+      ...new Set(
+        raw
+          .split(",")
+          .map((u) => u.trim())
+          .filter(Boolean),
+      ),
+    ].slice(0, 50);
+
+    if (usernames.length === 0) {
+      return res.status(200).json({
+        success: true,
+        avatars: {},
+      });
+    }
+
+    const users = await User.find({ username: { $in: usernames } }).select(
+      "username avatar",
+    );
+
+    const avatars = {};
+    users.forEach((u) => {
+      avatars[u.username] = u.avatar || null;
+    });
+
+    res.status(200).json({
+      success: true,
+      avatars,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 module.exports = {
   getProfile,
   getLeaderboard,
@@ -451,4 +614,7 @@ module.exports = {
   acceptFriendRequest,
   rejectFriendRequest,
   removeFriend,
+  uploadAvatarImage,
+  removeAvatarImage,
+  getAvatarsByUsernames,
 };

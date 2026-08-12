@@ -13,6 +13,8 @@ import {
 } from "../utils/pgnClock";
 import { getCapturedGroupsFromFen } from "../utils/capturedPieces";
 import PlayerCard from "../components/PlayerCard";
+import useAvatars from "../hooks/useAvatars";
+import { isBotOrGhostBotName } from "../utils/isBotName";
 
 import {
   ChevronLeft,
@@ -154,6 +156,18 @@ const GameReview = () => {
   const pgnHasClock = useMemo(
     () => pgnHasClockAnnotations(state?.pgn),
     [state?.pgn],
+  );
+
+  const pgnWhiteName = pgnHeaders.White || "";
+  const pgnBlackName = pgnHeaders.Black || "";
+  const pgnAvatars = useAvatars([pgnWhiteName, pgnBlackName]);
+  const isWhiteBot = isBotOrGhostBotName(
+    pgnWhiteName,
+    pgnAvatars[pgnWhiteName]?.found,
+  );
+  const isBlackBot = isBotOrGhostBotName(
+    pgnBlackName,
+    pgnAvatars[pgnBlackName]?.found,
   );
 
   const baseTimeMs = useMemo(
@@ -488,6 +502,12 @@ const GameReview = () => {
                 pgnHeaders[topCardColor === "white" ? "White" : "Black"] ||
                 (topCardColor === "white" ? "White" : "Black")
               }
+              avatar={
+                topCardColor === "white"
+                  ? pgnAvatars[pgnWhiteName]?.avatar
+                  : pgnAvatars[pgnBlackName]?.avatar
+              }
+              isBot={topCardColor === "white" ? isWhiteBot : isBlackBot}
               onNameClick={
                 pgnHeaders[topCardColor === "white" ? "White" : "Black"]
                   ? () =>
@@ -568,6 +588,12 @@ const GameReview = () => {
                 pgnHeaders[bottomCardColor === "white" ? "White" : "Black"] ||
                 (bottomCardColor === "white" ? "White" : "Black")
               }
+              avatar={
+                bottomCardColor === "white"
+                  ? pgnAvatars[pgnWhiteName]?.avatar
+                  : pgnAvatars[pgnBlackName]?.avatar
+              }
+              isBot={bottomCardColor === "white" ? isWhiteBot : isBlackBot}
               onNameClick={
                 pgnHeaders[bottomCardColor === "white" ? "White" : "Black"]
                   ? () =>

@@ -39,6 +39,9 @@ const MultiplayerTester = ({
         whiteName: data.whiteName,
         blackName: data.blackName,
 
+        whiteAvatar: data.whiteAvatar || null,
+        blackAvatar: data.blackAvatar || null,
+
         whiteRating: data.whiteRating || 1200,
         blackRating: data.blackRating || 1200,
 
@@ -80,6 +83,7 @@ const MultiplayerTester = ({
     // Enter the matchmaking pool as soon as the modal opens.
     socket.emit("find-match", {
       username: activeUser.username,
+      avatar: activeUser.avatar || null,
       rating: activeUser.stats,
       timeControl,
       isRated,

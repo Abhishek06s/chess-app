@@ -9,12 +9,15 @@ import {
   acceptFriendRequest,
   rejectFriendRequest,
   removeFriend,
+  uploadAvatar,
+  removeAvatar,
 } from "../services/user.service";
 import { getMyGames, getGamesByUserId } from "../services/game.service";
 import { useAuth } from "../context/authContext";
 import { socket } from "../services/socket.service";
 import usePresence from "../hooks/usePresence";
 import StatusIndicator from "../components/StatusIndicator";
+import Avatar from "../components/Avatar";
 import { ChallengeButton, ChallengeModal } from "../components/Challenge";
 import { getHighestElo } from "../utils/highestElo";
 import {
@@ -171,7 +174,7 @@ const Profile = () => {
   const navigate = useNavigate();
   const { username } = useParams();
   const isPublicProfile = !!username;
-  const { user: authUser } = useAuth();
+  const { user: authUser, setUser: setAuthUser } = useAuth();
 
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -199,6 +202,9 @@ const Profile = () => {
 
   // Toasts
   const [toasts, setToasts] = useState([]);
+
+  // Avatar upload state — only relevant on the logged-in user's own profile
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   // Challenge popup — the user currently being challenged (or null if closed)
   const [challengeTarget, setChallengeTarget] = useState(null);
@@ -384,6 +390,53 @@ const Profile = () => {
     }
   };
 
+  // Avatar Handlers — only used on the logged-in user's own profile
+  const handleAvatarFileSelected = async (file) => {
+    if (!file) return;
+
+    const MAX_BYTES = 5 * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      showToast("Image must be 5MB or smaller", "error");
+      return;
+    }
+
+    setAvatarUploading(true);
+    try {
+      const response = await uploadAvatar(file);
+      setUser((prev) => (prev ? { ...prev, avatar: response.avatar } : prev));
+      setAuthUser((prev) =>
+        prev ? { ...prev, avatar: response.avatar } : prev,
+      );
+      showToast("Avatar updated");
+    } catch (error) {
+      console.error("Failed to upload avatar:", error);
+      showToast(
+        error?.response?.data?.message || "Failed to upload avatar",
+        "error",
+      );
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    setAvatarUploading(true);
+    try {
+      await removeAvatar();
+      setUser((prev) => (prev ? { ...prev, avatar: null } : prev));
+      setAuthUser((prev) => (prev ? { ...prev, avatar: null } : prev));
+      showToast("Avatar removed");
+    } catch (error) {
+      console.error("Failed to remove avatar:", error);
+      showToast(
+        error?.response?.data?.message || "Failed to remove avatar",
+        "error",
+      );
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
   // Challenge Handlers
   const handleOpenChallenge = (targetUser) => {
     setChallengeTarget(targetUser);
@@ -397,7 +450,9 @@ const Profile = () => {
     socket.emit("send-challenge", {
       targetUserId: targetUser._id,
       targetUsername: targetUser.username,
+      targetAvatar: targetUser.avatar || null,
       username: authUser?.username,
+      avatar: authUser?.avatar || null,
       rating: authUser?.stats,
       timeControl,
       isRated: rated,
@@ -447,9 +502,15 @@ const Profile = () => {
           <div className="flex flex-col md:flex-row items-center md:items-end justify-between gap-6 -mt-12 mb-8">
             <div className="flex flex-col md:flex-row items-center md:items-end gap-4 text-center md:text-left">
               <div className="bg-zinc-900 p-2 rounded-full border border-zinc-800 shadow-xl z-10">
-                <div className="w-24 h-24 bg-linear-to-br from-indigo-500 to-purple-500 rounded-full flex items-center justify-center text-3xl font-bold uppercase shadow-inner">
-                  {user.username.charAt(0)}
-                </div>
+                <Avatar
+                  src={user.avatar}
+                  username={user.username}
+                  size="xl"
+                  editable={!isPublicProfile}
+                  uploading={avatarUploading}
+                  onFileSelected={handleAvatarFileSelected}
+                  onRemove={user.avatar ? handleRemoveAvatar : undefined}
+                />
               </div>
 
               <div className="space-y-1 md:-mb-1">
@@ -602,8 +663,12 @@ const Profile = () => {
                             }
                             className="flex items-center gap-3 hover:opacity-80 transition-opacity flex-1 text-left min-w-0"
                           >
-                            <div className="w-9 h-9 shrink-0 bg-linear-to-br from-amber-500/20 to-orange-500/20 border border-amber-500/30 text-amber-400 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-inner">
-                              {requestUser.username.charAt(0)}
+                            <div className="w-9 h-9 shrink-0">
+                              <Avatar
+                                src={requestUser.avatar}
+                                username={requestUser.username}
+                                size="sm"
+                              />
                             </div>
                             <span className="min-w-0">
                               <span className="font-medium text-zinc-200 text-sm truncate block">
@@ -726,8 +791,12 @@ const Profile = () => {
                                 }
                                 className="flex items-center gap-3 hover:opacity-80 transition-opacity flex-1 text-left min-w-0"
                               >
-                                <div className="w-9 h-9 shrink-0 bg-linear-to-br from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 text-indigo-400 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-inner">
-                                  {result.username.charAt(0)}
+                                <div className="w-9 h-9 shrink-0">
+                                  <Avatar
+                                    src={result.avatar}
+                                    username={result.username}
+                                    size="sm"
+                                  />
                                 </div>
                                 <span className="min-w-0">
                                   <span className="flex items-center gap-2">
@@ -818,8 +887,12 @@ const Profile = () => {
                           }
                           className="flex items-center gap-3 hover:opacity-80 transition-opacity flex-1 text-left min-w-0"
                         >
-                          <div className="w-9 h-9 shrink-0 bg-linear-to-br from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 text-emerald-400 rounded-full flex items-center justify-center font-bold text-sm uppercase shadow-inner">
-                            {friend.username.charAt(0)}
+                          <div className="w-9 h-9 shrink-0">
+                            <Avatar
+                              src={friend.avatar}
+                              username={friend.username}
+                              size="sm"
+                            />
                           </div>
                           <span className="min-w-0">
                             <span className="flex items-center gap-2">

@@ -113,6 +113,8 @@ const Play = () => {
 
   const [whitePlayerName, setWhitePlayerName] = useState("White");
   const [blackPlayerName, setBlackPlayerName] = useState("Black");
+  const [whitePlayerAvatar, setWhitePlayerAvatar] = useState(null);
+  const [blackPlayerAvatar, setBlackPlayerAvatar] = useState(null);
   const [whitePlayerRating, setWhitePlayerRating] = useState(1200);
   const [blackPlayerRating, setBlackPlayerRating] = useState(1200);
   const [whitePlayerId, setWhitePlayerId] = useState(null);
@@ -211,6 +213,8 @@ const Play = () => {
     color,
     whiteName,
     blackName,
+    whiteAvatar,
+    blackAvatar,
     whiteRating,
     blackRating,
     whiteId,
@@ -236,6 +240,8 @@ const Play = () => {
 
     setWhitePlayerName(whiteName);
     setBlackPlayerName(blackName);
+    setWhitePlayerAvatar(whiteAvatar || null);
+    setBlackPlayerAvatar(blackAvatar || null);
     setWhitePlayerRating(whiteRating);
     setBlackPlayerRating(blackRating);
     setWhitePlayerId(whiteId);
@@ -591,6 +597,8 @@ const Play = () => {
     setTimeControl(roomState.timeControl || timeControl);
     setWhitePlayerName(roomState.whiteName || "White");
     setBlackPlayerName(roomState.blackName || "Black");
+    setWhitePlayerAvatar(roomState.whiteAvatar || null);
+    setBlackPlayerAvatar(roomState.blackAvatar || null);
     setWhitePlayerRating(roomState.whiteRating || 1200);
     setBlackPlayerRating(roomState.blackRating || 1200);
     setWhitePlayerId(roomState.whitePlayerId || null);
@@ -1858,6 +1866,14 @@ const Play = () => {
                   : "Searching for Opponent..."
                 : `${getBotDifficulty(botDifficulty).label} Bot (${topCardColor === "white" ? "White" : "Black"})`
             }
+            avatar={
+              gameMode === "multiplayer"
+                ? topCardColor === "white"
+                  ? whitePlayerAvatar
+                  : blackPlayerAvatar
+                : null
+            }
+            isBot={gameMode !== "multiplayer"}
             onNameClick={
               gameMode === "multiplayer" && isGameOver
                 ? () =>
@@ -1955,6 +1971,13 @@ const Play = () => {
                 : activeUser
                   ? activeUser.username || activeUser.name || "You"
                   : "You"
+            }
+            avatar={
+              gameMode === "multiplayer" && gameStarted
+                ? bottomCardColor === "white"
+                  ? whitePlayerAvatar
+                  : blackPlayerAvatar
+                : activeUser?.avatar || null
             }
             rating={
               !gameStarted && activeUser

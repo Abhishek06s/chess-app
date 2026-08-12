@@ -64,6 +64,7 @@ export const NotificationProvider = ({ children }) => {
           type: "friend_request",
           userId: r._id,
           username: r.username,
+          avatar: r.avatar || null,
           stats: r.stats,
           receivedAt: Date.now(),
         }));
@@ -102,6 +103,7 @@ export const NotificationProvider = ({ children }) => {
             type: "friend_request",
             userId: from._id,
             username: from.username,
+            avatar: from.avatar || null,
             stats: from.stats,
             receivedAt: Date.now(),
           },
@@ -241,6 +243,8 @@ export const NotificationProvider = ({ children }) => {
             color,
             whiteName: data.whiteName,
             blackName: data.blackName,
+            whiteAvatar: data.whiteAvatar || null,
+            blackAvatar: data.blackAvatar || null,
             whiteRating: data.whiteRating || 1200,
             blackRating: data.blackRating || 1200,
             whiteId: data.whiteUserId,
@@ -325,6 +329,7 @@ export const NotificationProvider = ({ children }) => {
         challengeId,
         accepted,
         username: user?.username,
+        avatar: user?.avatar || null,
         rating: user?.stats,
       });
       if (!accepted) {

@@ -1,9 +1,12 @@
 import React from "react";
 import { ExternalLink } from "lucide-react";
 import StatusIndicator from "./StatusIndicator";
+import Avatar from "./Avatar";
 
 const PlayerCard = ({
   name,
+  avatar = null,
+  isBot = false,
   rating,
   isOnline,
   status,
@@ -87,7 +90,10 @@ const PlayerCard = ({
         : "bg-zinc-800"
     }`}
     >
-      <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-3">
+        <Avatar src={avatar} username={name} isBot={isBot} size="md" className="-mt-6"/>
+
+        <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <span
             className={`w-4 h-4 rounded-full ${
@@ -164,6 +170,7 @@ const PlayerCard = ({
         {statusText && (
           <p className="text-xs text-amber-300 mt-2">{statusText}</p>
         )}
+        </div>
       </div>
 
       <div className="flex items-center gap-4">
